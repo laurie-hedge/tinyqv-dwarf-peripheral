@@ -35,7 +35,7 @@ module tqvp_laurie_dwarf5_line_table_accelerator (
     localparam PROGRAM_HEADER    = 6'h0;
     localparam PROGRAM_CODE      = 6'h1;
     localparam SM_ADDRESS        = 6'h2;
-    localparam SM_FILE_DESCRIM   = 6'h3;
+    localparam SM_FILE_DISCRIM   = 6'h3;
     localparam SM_LINE_COL_FLAGS = 6'h4;
     localparam STATUS            = 6'h5;
 
@@ -55,26 +55,48 @@ module tqvp_laurie_dwarf5_line_table_accelerator (
     localparam DW_LNS_SETEPILOGUEBEGIN = 8'h0B;
     localparam DW_LNS_SETISA           = 8'h0C;
 
-    localparam STATE_READY                  = 4'h0;
-    localparam STATE_PAUSE_FOR_EMIT         = 4'h1;
-    localparam STATE_PARSE_LEB_128_BYTE0    = 4'h2;
-    localparam STATE_PARSE_LEB_128_BYTE1    = 4'h3;
-    localparam STATE_PARSE_LEB_128_BYTE2    = 4'h4;
-    localparam STATE_PARSE_LEB_128_BYTE3    = 4'h5;
-    localparam STATE_PARSE_LEB_128_OVERFLOW = 4'h6;
-    localparam STATE_PARSE_U16_BYTE0        = 4'h7;
-    localparam STATE_PARSE_U16_BYTE1        = 4'h8;
-    localparam STATE_EXEC                   = 4'h9;
+    localparam EXTENDED_OPCODE_START   = 8'h00;
+    localparam DW_LNE_ENDSEQUENCE      = 8'h01;
+    localparam DW_LNE_SETADDRESS       = 8'h02;
+    localparam DW_LNE_SETDISCRIMINATOR = 8'h04;
 
-    localparam INSTR_NOP         = 3'h0;
-    localparam INSTR_ADVANCEPC   = 3'h1;
-    localparam INSTR_ADVANCELINE = 3'h2;
-    localparam INSTR_SETFILE     = 3'h3;
-    localparam INSTR_SETCOLUMN   = 3'h4;
+    typedef enum reg[4:0] {
+        STATE_READY,
+        STATE_PAUSE_FOR_COPY,
+        STATE_PAUSE_FOR_END_SEQUENCE,
+        STATE_PARSE_LEB_128_BYTE0,
+        STATE_PARSE_LEB_128_BYTE1,
+        STATE_PARSE_LEB_128_BYTE2,
+        STATE_PARSE_LEB_128_BYTE3,
+        STATE_PARSE_LEB_128_OVERFLOW,
+        STATE_PARSE_U16_BYTE0,
+        STATE_PARSE_U16_BYTE1,
+        STATE_PARSE_U64_BYTE0,
+        STATE_PARSE_U64_BYTE1,
+        STATE_PARSE_U64_BYTE2,
+        STATE_PARSE_U64_BYTE3,
+        STATE_PARSE_U64_BYTE4,
+        STATE_PARSE_U64_BYTE5,
+        STATE_PARSE_U64_BYTE6,
+        STATE_PARSE_U64_BYTE7,
+        STATE_EXEC
+    } state_machine;
 
-    reg[3:0]  st_state;
-    reg[2:0]  st_current_instruction;
-    reg       st_leb_signed;
+    typedef enum reg[2:0] {
+        INSTR_NOP,
+        INSTR_ADVANCEPC,
+        INSTR_ADVANCELINE,
+        INSTR_SETFILE,
+        INSTR_SETCOLUMN,
+        INSTR_EXTENDED,
+        INSTR_SETADDRESS,
+        INSTR_SETDISCRIMINATOR
+    } instruction;
+
+    state_machine st_state;
+    instruction   st_current_instruction;
+    reg           st_leb_signed;
+    reg           st_extended;
 
     reg       ph_default_is_stmt;
     reg [7:0] ph_line_base;
@@ -111,6 +133,7 @@ module tqvp_laurie_dwarf5_line_table_accelerator (
     always @(posedge clk) begin
         if (!rst_n) begin
             st_state           <= STATE_READY;
+            st_extended        <= 0;
             out_status         <= STATUS_READY;
             ph_default_is_stmt <= 0;
             ph_line_base       <= 8'h0;
@@ -132,10 +155,11 @@ module tqvp_laurie_dwarf5_line_table_accelerator (
         end else if (data_write_n != RW_NONE) begin
             if (address == PROGRAM_HEADER) begin
                 st_state           <= STATE_READY;
+                st_extended        <= 0;
                 out_status         <= STATUS_READY;
                 ph_default_is_stmt <= data_in[0];
                 pc_ip              <= 3'h0;
-                pc_valid           <= data_write_n;
+                pc_valid           <= RW_NONE;
                 sm_address         <= 27'h0;
                 sm_file            <= 16'h1;
                 sm_line            <= 16'h1;
@@ -167,10 +191,22 @@ module tqvp_laurie_dwarf5_line_table_accelerator (
                 st_state      <= STATE_READY;
                 out_status    <= STATUS_READY;
                 out_interrupt <= 0;
-                if (st_state == STATE_PAUSE_FOR_EMIT) begin
+                if (st_state == STATE_PAUSE_FOR_COPY) begin
                     sm_basic_block    <= 0;
                     sm_prologue_end   <= 0;
                     sm_epilogue_begin <= 0;
+                    sm_descriminator  <= 16'h0;
+                end else if (st_state == STATE_PAUSE_FOR_END_SEQUENCE) begin
+                    sm_address         <= 27'h0;
+                    sm_file            <= 16'h1;
+                    sm_line            <= 16'h1;
+                    sm_column          <= 10'h0;
+                    sm_is_stmt         <= ph_default_is_stmt;
+                    sm_basic_block     <= 0;
+                    sm_end_sequence    <= 0;
+                    sm_prologue_end    <= 0;
+                    sm_epilogue_begin  <= 0;
+                    sm_descriminator   <= 16'h0;
                 end
             end
         end else if (st_state == STATE_EXEC) begin
@@ -183,44 +219,71 @@ module tqvp_laurie_dwarf5_line_table_accelerator (
                 sm_file <= pc_operand[15:0];
             end else if (st_current_instruction == INSTR_SETCOLUMN) begin
                 sm_column <= pc_operand[9:0];
+            end else if (st_current_instruction == INSTR_EXTENDED) begin
+                st_extended <= 1;
+            end else if (st_current_instruction == INSTR_SETADDRESS) begin
+                sm_address <= pc_operand[27:1];
+            end else if (st_current_instruction == INSTR_SETDISCRIMINATOR) begin
+                sm_descriminator <= pc_operand[15:0];
             end
         end else if (pc_next_valid == 1) begin
             if (st_state == STATE_READY) begin
-                if (pc_next_byte == DW_LNS_COPY) begin
-                    st_state      <= STATE_PAUSE_FOR_EMIT;
-                    out_status    <= STATUS_EMIT_ROW;
-                    out_interrupt <= 1;
-                end else if (pc_next_byte == DW_LNS_ADVANCEPC) begin
-                    st_state               <= STATE_PARSE_LEB_128_BYTE0;
-                    st_current_instruction <= INSTR_ADVANCEPC;
-                    st_leb_signed          <= 0;
-                end else if (pc_next_byte == DW_LNS_ADVANCELINE) begin
-                    st_state               <= STATE_PARSE_LEB_128_BYTE0;
-                    st_current_instruction <= INSTR_ADVANCELINE;
-                    st_leb_signed          <= 1;
-                end else if (pc_next_byte == DW_LNS_SETFILE) begin
-                    st_state               <= STATE_PARSE_LEB_128_BYTE0;
-                    st_current_instruction <= INSTR_SETFILE;
-                    st_leb_signed          <= 0;
-                end else if (pc_next_byte == DW_LNS_SETCOLUMN) begin
-                    st_state               <= STATE_PARSE_LEB_128_BYTE0;
-                    st_current_instruction <= INSTR_SETCOLUMN;
-                    st_leb_signed          <= 0;
-                end else if (pc_next_byte == DW_LNS_NEGATESTMT) begin
-                    sm_is_stmt <= ~sm_is_stmt;
-                end else if (pc_next_byte == DW_LNS_SETBASICBLOCK) begin
-                    sm_basic_block <= 1;
-                end else if (pc_next_byte == DW_LNS_FIXEDADVANCEPC) begin
-                    st_state               <= STATE_PARSE_U16_BYTE0;
-                    st_current_instruction <= INSTR_ADVANCEPC;
-                end else if (pc_next_byte == DW_LNS_SETPROLOGUEEND) begin
-                    sm_prologue_end <= 1;
-                end else if (pc_next_byte == DW_LNS_SETEPILOGUEBEGIN) begin
-                    sm_epilogue_begin <= 1;
-                end else if (pc_next_byte == DW_LNS_SETISA) begin
-                    st_state               <= STATE_PARSE_LEB_128_BYTE0;
-                    st_current_instruction <= INSTR_NOP;
-                    st_leb_signed          <= 0;
+                if (st_extended) begin
+                    st_extended <= 0;
+                    if (pc_next_byte == DW_LNE_ENDSEQUENCE) begin
+                        st_state        <= STATE_PAUSE_FOR_END_SEQUENCE;
+                        sm_end_sequence <= 1;
+                        out_status      <= STATUS_EMIT_ROW;
+                        out_interrupt   <= 1;
+                    end else if (pc_next_byte == DW_LNE_SETADDRESS) begin
+                        st_state               <= STATE_PARSE_U64_BYTE0;
+                        st_current_instruction <= INSTR_SETADDRESS;
+                    end else if (pc_next_byte == DW_LNE_SETDISCRIMINATOR) begin
+                        st_state               <= STATE_PARSE_LEB_128_BYTE0;
+                        st_current_instruction <= INSTR_SETDISCRIMINATOR;
+                        st_leb_signed          <= 0;
+                    end
+                end else begin
+                    if (pc_next_byte == DW_LNS_COPY) begin
+                        st_state      <= STATE_PAUSE_FOR_COPY;
+                        out_status    <= STATUS_EMIT_ROW;
+                        out_interrupt <= 1;
+                    end else if (pc_next_byte == DW_LNS_ADVANCEPC) begin
+                        st_state               <= STATE_PARSE_LEB_128_BYTE0;
+                        st_current_instruction <= INSTR_ADVANCEPC;
+                        st_leb_signed          <= 0;
+                    end else if (pc_next_byte == DW_LNS_ADVANCELINE) begin
+                        st_state               <= STATE_PARSE_LEB_128_BYTE0;
+                        st_current_instruction <= INSTR_ADVANCELINE;
+                        st_leb_signed          <= 1;
+                    end else if (pc_next_byte == DW_LNS_SETFILE) begin
+                        st_state               <= STATE_PARSE_LEB_128_BYTE0;
+                        st_current_instruction <= INSTR_SETFILE;
+                        st_leb_signed          <= 0;
+                    end else if (pc_next_byte == DW_LNS_SETCOLUMN) begin
+                        st_state               <= STATE_PARSE_LEB_128_BYTE0;
+                        st_current_instruction <= INSTR_SETCOLUMN;
+                        st_leb_signed          <= 0;
+                    end else if (pc_next_byte == DW_LNS_NEGATESTMT) begin
+                        sm_is_stmt <= ~sm_is_stmt;
+                    end else if (pc_next_byte == DW_LNS_SETBASICBLOCK) begin
+                        sm_basic_block <= 1;
+                    end else if (pc_next_byte == DW_LNS_FIXEDADVANCEPC) begin
+                        st_state               <= STATE_PARSE_U16_BYTE0;
+                        st_current_instruction <= INSTR_ADVANCEPC;
+                    end else if (pc_next_byte == DW_LNS_SETPROLOGUEEND) begin
+                        sm_prologue_end <= 1;
+                    end else if (pc_next_byte == DW_LNS_SETEPILOGUEBEGIN) begin
+                        sm_epilogue_begin <= 1;
+                    end else if (pc_next_byte == DW_LNS_SETISA) begin
+                        st_state               <= STATE_PARSE_LEB_128_BYTE0;
+                        st_current_instruction <= INSTR_NOP;
+                        st_leb_signed          <= 0;
+                    end else if (pc_next_byte == EXTENDED_OPCODE_START) begin
+                        st_state               <= STATE_PARSE_LEB_128_BYTE0;
+                        st_current_instruction <= INSTR_EXTENDED;
+                        st_leb_signed          <= 0;
+                    end
                 end
             end else if (st_state == STATE_PARSE_LEB_128_BYTE0) begin
                 st_state        <= pc_leb_last_byte ? STATE_EXEC : STATE_PARSE_LEB_128_BYTE1;
@@ -251,8 +314,28 @@ module tqvp_laurie_dwarf5_line_table_accelerator (
             end else if (st_state == STATE_PARSE_U16_BYTE1) begin
                 st_state         <= STATE_EXEC;
                 pc_operand[31:8] <= { 16'h0, pc_next_byte[7:0] };
+            end else if (st_state == STATE_PARSE_U64_BYTE0) begin
+                st_state        <= STATE_PARSE_U64_BYTE1;
+                pc_operand[7:0] <= pc_next_byte[7:0];
+            end else if (st_state == STATE_PARSE_U64_BYTE1) begin
+                st_state         <= STATE_PARSE_U64_BYTE2;
+                pc_operand[15:8] <= pc_next_byte[7:0];
+            end else if (st_state == STATE_PARSE_U64_BYTE2) begin
+                st_state          <= STATE_PARSE_U64_BYTE3;
+                pc_operand[23:16] <= pc_next_byte[7:0];
+            end else if (st_state == STATE_PARSE_U64_BYTE3) begin
+                st_state          <= STATE_PARSE_U64_BYTE4;
+                pc_operand[27:24] <= pc_next_byte[3:0];
+            end else if (st_state == STATE_PARSE_U64_BYTE4) begin
+                st_state          <= STATE_PARSE_U64_BYTE5;
+            end else if (st_state == STATE_PARSE_U64_BYTE5) begin
+                st_state          <= STATE_PARSE_U64_BYTE6;
+            end else if (st_state == STATE_PARSE_U64_BYTE6) begin
+                st_state          <= STATE_PARSE_U64_BYTE7;
+            end else if (st_state == STATE_PARSE_U64_BYTE7) begin
+                st_state          <= STATE_EXEC;
             end
-            pc_ip <= st_state != STATE_PAUSE_FOR_EMIT ? pc_ip + 1 : pc_ip;
+            pc_ip <= (st_state != STATE_PAUSE_FOR_COPY && st_state != STATE_PAUSE_FOR_END_SEQUENCE) ? pc_ip + 1 : pc_ip;
         end
     end
 
@@ -277,21 +360,21 @@ module tqvp_laurie_dwarf5_line_table_accelerator (
     assign data_out[31:16] = data_read_n != RW_32_BIT     ? 16'h0 :
                              address == PROGRAM_HEADER    ? out_program_header[31:16] :
                              address == SM_ADDRESS        ? out_sm_address[31:16] :
-                             address == SM_FILE_DESCRIM   ? out_sm_file_descrim[31:16] :
+                             address == SM_FILE_DISCRIM   ? out_sm_file_descrim[31:16] :
                              address == SM_LINE_COL_FLAGS ? out_sm_line_col_flags[31:16] :
                                                             16'h0;
 
     assign data_out[15:8] = data_read_n[0] == data_read_n[1] ? 8'h0 :
                             address == PROGRAM_HEADER        ? out_program_header[15:8] :
                             address == SM_ADDRESS            ? out_sm_address[15:8] :
-                            address == SM_FILE_DESCRIM       ? out_sm_file_descrim[15:8] :
+                            address == SM_FILE_DISCRIM       ? out_sm_file_descrim[15:8] :
                             address == SM_LINE_COL_FLAGS     ? out_sm_line_col_flags[15:8] :
                                                                8'h0;
 
     assign data_out[7:0] = data_read_n == RW_NONE       ? 8'h0 :
                            address == PROGRAM_HEADER    ? out_program_header[7:0] :
                            address == SM_ADDRESS        ? out_sm_address[7:0] :
-                           address == SM_FILE_DESCRIM   ? out_sm_file_descrim[7:0] :
+                           address == SM_FILE_DISCRIM   ? out_sm_file_descrim[7:0] :
                            address == SM_LINE_COL_FLAGS ? out_sm_line_col_flags[7:0] :
                            address == STATUS            ? { 7'h0, out_status } :
                                                           8'h0;
