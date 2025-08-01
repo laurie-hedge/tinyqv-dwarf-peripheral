@@ -37,7 +37,7 @@ module tt_um_tqv_peripheral_harness (
   always @(negedge clk) rst_reg_n <= rst_n;
 
   // The peripheral under test.
-  tqvp_laurie_dwarf5_line_table_accelerator user_peripheral(
+  tqvp_laurie_dwarf_line_table_accelerator user_peripheral(
     .clk(clk),
     .rst_n(rst_reg_n),
     .ui_in(ui_in_sync),

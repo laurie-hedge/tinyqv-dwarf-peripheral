@@ -5,7 +5,7 @@
 SIM ?= icarus
 TOPLEVEL_LANG ?= verilog
 SRC_DIR = $(PWD)/../src
-PROJECT_SOURCES = tqvp_laurie_dwarf5_line_table_accelerator.sv
+PROJECT_SOURCES = tqvp_laurie_dwarf_line_table_accelerator.sv
 ADDITIONAL_SOURCES = tt_wrapper.v test_harness/*.sv
 
 ifneq ($(GATES),yes)
