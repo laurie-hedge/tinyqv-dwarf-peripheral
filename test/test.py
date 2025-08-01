@@ -19,6 +19,7 @@ class MmReg:
     AM_FILE_DISCRIM   = 3
     AM_LINE_COL_FLAGS = 4
     STATUS            = 5
+    INFO              = 6
 
 class Status:
     READY    = 0
@@ -59,6 +60,7 @@ async def test_register_read_write_reset(dut):
     assert await tqv.read_byte_reg(MmReg.AM_FILE_DISCRIM)   == 0x1
     assert await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS) == 0x1
     assert await tqv.read_word_reg(MmReg.STATUS)            == Status.READY
+    assert await tqv.read_word_reg(MmReg.INFO)              == 0x00000155
 
     # test default value of is_stmt updated on new program header
     await tqv.write_word_reg(MmReg.PROGRAM_HEADER, 0x00000001)
@@ -75,6 +77,8 @@ async def test_register_read_write_reset(dut):
     assert await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS) == 0x1
     await tqv.write_word_reg(MmReg.STATUS, 0xABCD1234)
     assert await tqv.read_word_reg(MmReg.STATUS) == Status.READY
+    await tqv.write_word_reg(MmReg.INFO, 0xABCD1234)
+    assert await tqv.read_word_reg(MmReg.INFO) == 0x00000155
 
     # test writes to read-write registers
     await tqv.write_word_reg(MmReg.PROGRAM_HEADER, 0xABCD2301)
@@ -96,7 +100,8 @@ async def test_register_read_write_reset(dut):
         MmReg.AM_ADDRESS,
         MmReg.AM_FILE_DISCRIM,
         MmReg.AM_LINE_COL_FLAGS,
-        MmReg.STATUS
+        MmReg.STATUS,
+        MmReg.INFO,
     ])
     for illegal_reg in [i for i in range(64) if i not in real_registers]:
         await tqv.write_word_reg(illegal_reg, 0xFFFFFFFF)

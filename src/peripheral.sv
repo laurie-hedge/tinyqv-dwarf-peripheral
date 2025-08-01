@@ -44,6 +44,7 @@ module tqvp_laurie_dwarf5_line_table_accelerator(
     localparam AM_FILE_DISCRIM   = 6'h3;
     localparam AM_LINE_COL_FLAGS = 6'h4;
     localparam STATUS            = 6'h5;
+    localparam INFO              = 6'h6;
 
     // PERIPHERAL STATUS CODES
     // Public interface, values read by software from the STATUS register. Defined by the spec for
@@ -715,6 +716,8 @@ module tqvp_laurie_dwarf5_line_table_accelerator(
     // This logic composes the internal state into the format of the public facing memory mapped
     // registers, and selects which if any to write back over the SPI.
 
+    localparam VERSION_INFO = 32'h00000155;
+
     assign data_out[7:0]   = register_read_byte0       ? out_selected_register[7:0]   : 8'h0;
     assign data_out[15:8]  = register_read_byte1       ? out_selected_register[15:8]  : 8'h0;
     assign data_out[31:16] = register_read_byte2_byte3 ? out_selected_register[31:16] : 16'h0;
@@ -736,6 +739,7 @@ module tqvp_laurie_dwarf5_line_table_accelerator(
             AM_FILE_DISCRIM:   out_selected_register = out_am_file_descrim;
             AM_LINE_COL_FLAGS: out_selected_register = out_am_line_col_flags;
             STATUS:            out_selected_register = { 31'h0, out_status };
+            INFO:              out_selected_register = VERSION_INFO;
             default:           out_selected_register = 32'h0;
         endcase
     end
