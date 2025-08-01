@@ -790,10 +790,11 @@ module tqvp_laurie_dwarf5_line_table_accelerator(
         add_operand_to_am_line    ? { 12'h0, am_line }   :
         28'h0;
 
-    // UNUSED Pmod interface is unused. Drive the outputs to 0 except for uo_out[0] which is used by
-    // the system for UART TX. Mark the Pmod inputs as unused to avoid warnings.
+    // UNUSED
+    // Pmod interface is unused. Drive the outputs to 0 and mark the Pmod inputs as unused to avoid
+    // warnings.
 
-    assign uo_out[7:1] = 7'h0;
+    assign uo_out[7:0] = 8'h0;
 
     wire _unused  = &{ ui_in };
 
