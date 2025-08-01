@@ -61,7 +61,7 @@ module tqvp_laurie_dwarf5_line_table_accelerator(
     localparam DW_LNS_SETCOLUMN        = 8'h05;
     localparam DW_LNS_NEGATESTMT       = 8'h06;
     localparam DW_LNS_SETBASICBLOCK    = 8'h07;
-    localparam DW_LNS_CONSTADDPC       = 8'h08;
+    // localparam DW_LNS_CONSTADDPC       = 8'h08; // TODO: restore when special opcodes implemented
     localparam DW_LNS_FIXEDADVANCEPC   = 8'h09;
     localparam DW_LNS_SETPROLOGUEEND   = 8'h0A;
     localparam DW_LNS_SETEPILOGUEBEGIN = 8'h0B;
@@ -567,7 +567,7 @@ module tqvp_laurie_dwarf5_line_table_accelerator(
     logic [9:0]  am_column;
 
     always_ff @(posedge clk) begin
-        if      (reset_am_column)             am_column <= 16'h0;
+        if      (reset_am_column)             am_column <= 10'h0;
         else if (assign_operand_to_am_column) am_column <= st_operand[9:0];
     end
 
