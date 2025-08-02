@@ -68,12 +68,19 @@ This register contains the current state of the peripheral. It should generally 
 
 If the register has the value STATUS_EMIT_ROW following an interrupt, writing the register will change STATUS back to STATUS_READY (regardless of the value written) and will make the peripheral resume executing the current program. After receiving a STATUS_EMIT_ROW interrupt, the row being emitted should be read and only after should STATUS be written.
 
+If the register has the value STATUS_BUSY following an interrupt, it means that the peripheral is processing a long running special instruction. No further writes to PROGRAM_CODE can be made, and instead software should continue to poll STATUS until it changes to STATUS_EMIT_ROW, meaning that the row is ready to read. To resume, STATUS should be written as in the case where the status code had initially been STATUS_EMIT_ROW.
+
+| 31:2   | 1:0         |
+|--------|-------------|
+| unused | status code |
+
 **Status Codes**
 
 | Code | Name            | Description |
 |------|-----------------|-------------|
 | 0x00 | STATUS_READY    | Peripheral is ready to receive writes to PROGRAM_HEADER and PROGRAM_CODE. No interrupt has been raised. |
 | 0x01 | STATUS_EMIT_ROW | Peripheral has raised an interrupt to indicate that a row has been emitted. Read the row from AM_ADDRESS, AM_FILE_DISCRIM, and AM_LINE_COL_FLAGS. |
+| 0x02 | STATUS_BUSY     | Peripheral is busy processing instructions and cannot accept writes to PROGRAM_CODE at this time |
 
 ### INFO
 
