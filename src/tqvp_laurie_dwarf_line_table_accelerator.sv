@@ -395,7 +395,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     always_ff @(posedge clk) begin
         if      (reset_st_ip)           st_ip <= 3'h0;
-        else if (parse_byte_this_cycle) st_ip <= incrementer_dest;
+        else if (parse_byte_this_cycle) st_ip <= incrementer_dest[2:0];
     end
 
     logic reset_st_ip;
@@ -622,7 +622,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     assign byte_subtractor_src0 =
         special_opcode_this_cycle       ? st_operand[7:0] :
         parse_special_opcode_this_cycle ? current_byte :
-                                          28'hFF;
+                                          8'hFF;
 
     assign byte_subtractor_src1 = special_opcode_this_cycle ? ph_line_range : ph_opcode_base;
 
@@ -898,7 +898,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
             AM_ADDRESS:        out_selected_register = out_am_address;
             AM_FILE_DISCRIM:   out_selected_register = out_am_file_descrim;
             AM_LINE_COL_FLAGS: out_selected_register = out_am_line_col_flags;
-            STATUS:            out_selected_register = { 31'h0, out_status };
+            STATUS:            out_selected_register = { 30'h0, out_status };
             INFO:              out_selected_register = VERSION_INFO;
             default:           out_selected_register = 32'h0;
         endcase
