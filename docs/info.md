@@ -70,9 +70,7 @@ If the register has the value STATUS_EMIT_ROW following an interrupt, writing th
 
 If the register has the value STATUS_BUSY following an interrupt, it means that the peripheral is processing a long running special instruction. No further writes to PROGRAM_CODE can be made, and instead software should continue to poll STATUS until it changes to STATUS_EMIT_ROW, meaning that the row is ready to read. To resume, STATUS should be written as in the case where the status code had initially been STATUS_EMIT_ROW.
 
-| 31:2   | 1:0         |
-|--------|-------------|
-| unused | status code |
+If the register has the value STATUS_ILLEGAL following an interrupt, it means that the program has stopped running due to hitting an illegal instruction. Writing to STATUS after an illegal instruction will reset the state of the peripheral so that it is ready to execute code again, but the state of the abstract machine will be reset.
 
 **Status Codes**
 
@@ -80,7 +78,8 @@ If the register has the value STATUS_BUSY following an interrupt, it means that 
 |------|-----------------|-------------|
 | 0x00 | STATUS_READY    | Peripheral is ready to receive writes to PROGRAM_HEADER and PROGRAM_CODE. No interrupt has been raised. |
 | 0x01 | STATUS_EMIT_ROW | Peripheral has raised an interrupt to indicate that a row has been emitted. Read the row from AM_ADDRESS, AM_FILE_DISCRIM, and AM_LINE_COL_FLAGS. |
-| 0x02 | STATUS_BUSY     | Peripheral is busy processing instructions and cannot accept writes to PROGRAM_CODE at this time |
+| 0x02 | STATUS_BUSY     | Peripheral is busy processing instructions and cannot accept writes to PROGRAM_CODE at this time. |
+| 0x03 | STATUS_ILLEGAL  | Peripheral has stopped due to hitting an illegal instruction. |
 
 ### INFO
 
