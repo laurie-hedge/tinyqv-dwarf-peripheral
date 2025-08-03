@@ -94,9 +94,40 @@ This register contains information about the version of the hardware and the ran
 Tests should be run from inside a Docker container using a Docker image built from
 tinyqv-dwarf-peripheral/.devcontainer/Dockerfile.
 
-From the tests directory, run
+### Unit tests
+
+The unit tests are hand written tests using the cocotb test framework, covering each instruction and various interesting cases.
+
+To run the tests, from inside the Docker container, run
 ```
+cd /path/to/tinyqv-dwarf-peripheral/test
 make -B
+```
+
+### RIS tests
+
+Random Instruction Sequence (RIS) tests work by generating a semi-random sequence of instructions to execute, and then running these instructions of both the peripheral (simulated by verilating the HDL) and through a simulator written in C++ which acts as a golden reference. The testbench compares the results of each to ensure they produce the same results. Since these tests are random, they will vary each time the tests are run, so are not run as part of CI.
+
+To run these tests, from inside the Docker container, run
+```
+cd /path/to/tinyqv-dwarf-peripheral/ris-test
+make
+./obj_dir/testbench --run 100
+```
+
+This will run 100 randomly generated tests. You can change the number to run as many tests as you want. If a test fails, it will report the error and save a file called `test.bin`. This file captures the input into the specific test that failed, so that it can be replayed and debugged.
+
+To replay a test.bin file, from the same directory as before, run
+```
+./obj_dir/testbench --rerun test.bin
+```
+
+To enable generation of the waves for the test, uncomment this section at the bottom of `tqvp_laurie_dwarf_line_table_accelerator.sv`.
+```
+// initial begin
+//     $dumpfile("trace.vcd");
+//     $dumpvars();
+// end
 ```
 
 ## External hardware

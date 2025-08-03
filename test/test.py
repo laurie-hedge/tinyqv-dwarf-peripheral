@@ -407,7 +407,7 @@ async def test_dw_lns_const_add_pc(dut):
     assert await wait_for_interrupt(dut, tqv, 10)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 100)
     assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 34
-    assert await read_sm_line(tqv)                   == 2
+    assert await read_sm_line(tqv)                   == 1
     await tqv.write_byte_reg(MmReg.STATUS, 0)
 
     # test multiple const add pc with line_base=-4 and line_range=25
@@ -416,7 +416,7 @@ async def test_dw_lns_const_add_pc(dut):
     assert await wait_for_interrupt(dut, tqv, 10)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 100)
     assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 27
-    assert await read_sm_line(tqv)                   == 40
+    assert await read_sm_line(tqv)                   == 1
     await tqv.write_byte_reg(MmReg.STATUS, 0)
 
 @cocotb.test()
@@ -668,10 +668,8 @@ async def test_illegal_instruction(dut):
 
     # test illegal extended opcodes
     for illegal_opcode in [0x3, 0x66]:
-        await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 24) | (illegal_opcode << 16) | (0x09 << 8) | ExtendedOpcode.START)
-        await tqv.write_word_reg(MmReg.PROGRAM_CODE, 0xFFFFFFFF)
-        await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsSetBasicBlock << 24) | 0xFFFFFF)
-        await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
+        await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (0x09 << 8) | ExtendedOpcode.START)
+        await tqv.write_byte_reg(MmReg.PROGRAM_CODE, illegal_opcode)
         assert await wait_for_interrupt(dut, tqv, 100)
         assert await read_sm_basic_block(tqv)        == 0
         assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.ILLEGAL
@@ -689,8 +687,7 @@ async def test_illegal_instruction(dut):
 
     # test illegal standard opcodes
     await tqv.write_word_reg(MmReg.PROGRAM_HEADER, 0x0F010000)
-    await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsSetBasicBlock << 8) | 0x0E)
-    await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
+    await tqv.write_byte_reg(MmReg.PROGRAM_CODE, 0x0E)
     assert await wait_for_interrupt(dut, tqv, 100)
     assert await read_sm_basic_block(tqv)        == 0
     assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.ILLEGAL

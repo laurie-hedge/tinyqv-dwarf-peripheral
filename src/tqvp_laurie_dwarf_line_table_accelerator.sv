@@ -25,6 +25,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     // Interrupt request to TinyQV core.
     output        user_interrupt
 );
+
     // REGISTER READ/WRITE CONTROL VALUES
     // Register read/write control values used by data_write_n and data_read_n on the interface, and
     // by st_program_code_valid internally. Defined by TinyQV SPI spec.
@@ -708,7 +709,8 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign add_src1_to_am_line =
         (exec_current_instruction_this_cycle && current_instruction_is_advanceline) ||
-        parse_special_opcode_or_constaddpc_this_cycle || special_opcode_end_this_cycle;
+        parse_special_opcode_this_cycle ||
+        (special_opcode_end_this_cycle && current_instruction_is_nop);
 
     logic [27:0] sign_extended_line_base;
 
@@ -871,7 +873,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign set_out_status_ready =
         reset_this_cycle || write_program_header || write_status ||
-        (out_status == STATUS_BUSY && state_is_ready && !current_byte_valid);
+        (out_status == STATUS_BUSY && !current_byte_valid && !set_out_status_emit_row);
 
     assign set_out_status_emit_row =
         (parse_standard_opcode_this_cycle && current_byte_is_lns_copy) ||
@@ -935,7 +937,9 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic clear_interrupt;
     logic raise_interrupt;
 
-    assign clear_interrupt = reset_this_cycle || write_status || special_opcode_end_this_cycle;
+    assign clear_interrupt =
+        reset_this_cycle || write_status || write_program_header || write_program_code ||
+        special_opcode_end_this_cycle;
 
     assign raise_interrupt =
         (parse_standard_opcode_this_cycle && current_byte_is_lns_copy) ||
@@ -1120,5 +1124,13 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     assign uo_out[7:0] = 8'h0;
 
     wire _unused  = &{ ui_in };
+
+    // DEBUG
+    // Enable to dump the waves when running under verilator.
+
+    // initial begin
+    //     $dumpfile("trace.vcd");
+    //     $dumpvars();
+    // end
 
 endmodule
