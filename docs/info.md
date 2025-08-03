@@ -6,7 +6,68 @@ Peripheral index: TBD
 
 ## What it does
 
-Explain what your peripheral does and how it works
+### Overview
+
+The [DWARF file format](https://dwarfstd.org/) is used to store debug information for compiled programs. The line table, the mapping between machine code instructions and the source code it was compiled from, is encoded as a small program targeting an abstract machine. This peripheral is an accelerator for running these line table programs.
+
+### Usage
+
+The peripheral should first be reset at the start of day.
+
+The peripheral communicates with the program driving execution of the line table program through interrupts, so an interrupt handler should be setup for the peripheral before attempting to use it.
+
+To execute a program, first write the PROGRAM_HEADER register with the fields extracted from the program header in the DWARF file. The packed format of these fields is detailed in the PROGRAM_HEADER section. This will reset the abstract machine and prepare the peripheral for use.
+
+Next, write the code of the program to the PROGRAM_CODE register in a loop. These writes can consist of 1, 2, or 4 bytes at a time, but all bytes must be part of the program. It is suggested to write as much of the program as possible using 4 byte writes, and only use 2 and 1 byte chunks for the remaining bytes at the tail of the program.
+
+As the program is written, the peripheral may raise interrupts in a few cases. First, if the program hits a long running instruction and so cannot keep up with the speed of writes to PROGRAM_CODE, it will raise an interrupt and set STATUS to STATUS_BUSY until all instructions received so far have been executed. The interrupt handler should poll STATUS until it reads a value other than STATUS_BUSY before continuing.
+
+Second, when the program asks to emit a row of the line table, an interrupt will be raised with the STATUS set to STATUS_EMIT_ROW. This will pause the execution of the program, even if valid bytes still remain. This gives the interrupt handler the change to read the abstract machine state from the AM registers and emit a row. To continue execution, write any value to STATUS.
+
+Third, if a program hits an unknown instruction, it will raise an interrupt and set STATUS to STATUS_ILLEGAL. This error is unrecoverable. The program should be abandoned and the chip should be configured for its next program with a new write to PROGRAM_HEADER.
+
+### Usage Example
+
+The following pseudo-code outlines the expected usage of the peripheral.
+
+```
+def main():
+	register_interrupt_handler(handle_dwarf_line_table_interrupt)
+	line_table_program_header = read_line_table_program_header(dwarf_file)
+	write_to_reg(PROGRAM_HEADER, pack(line_table_program_header))
+	while next_code_chunk = read_code_chunk(dwarf_file):
+		write_to_reg(PROGRAM_CODE, next_code_chunk)
+
+def handle_dwarf_line_table_interrupt():
+	status = read_from_reg(STATUS)
+	while status == STATUS_BUSY:
+		status = read_from_reg(STATUS)
+	if status == STATUS_ILLEGAL:
+		report_error_and_quit()
+	if status == STATUS_EMIT_ROW:
+		address        = read_from_reg(AM_ADDRESS)
+		file_descrim   = read_from_reg(AM_FILE_DISCRIM)
+		line_col_flags = read_from_reg(AM_LINE_COL_FLAGS)
+		unpack_and_emit_row(address, file_descrim, line_col_flags)
+		write_to_reg(STATUS, 0)
+	clear_interrupt_and_resume_main()
+
+```
+
+### Limitations
+
+This peripheral only supports version 5 of the DWARF format.
+
+Unknown instructions raise an illegal instruction interrupt and halt termination of the program, rather than being silently ignored.
+
+Since this peripheral was designed as a companion to the TinyQV CPU, it only support a limited subset of the full DWARF line table accelerator abstract machine. In particular, it has the following limitations.
+
+* The `address` register is limited to 28 bits to match the number of physical address bits supported by TinyQV.
+* The `op_index` register is not implemented since it is only used for VLIW, which are not applicable to RV32EC.
+* The `file`, `line`, and `discriminator` registers are limited to 16 bits.
+* The `column` register is limited to 10 bits.
+* The `isa` register is not implemented since only RV32EC is supported.
+* The `DW_LNE_define_file` extended opcode, which is deprecated in DWARF v5, is unimplemented, since there is no sensible way of implementing this instruction in a peripheral without greatly extending its scope.
 
 ## Register map
 
