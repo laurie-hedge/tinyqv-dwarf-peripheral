@@ -150,27 +150,22 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign reset_this_cycle = !rst_n;
 
-    assign write_this_cycle =
-        !reset_this_cycle && data_write_n != RW_NONE;
+    assign write_this_cycle = rst_n && data_write_active;
 
-    assign exec_current_instruction_this_cycle =
-        !reset_this_cycle && !write_this_cycle && st_state == STATE_EXEC;
+    assign exec_current_instruction_this_cycle = rst_n && !write_this_cycle && state_is_exec;
 
-    assign special_opcode_this_cycle =
-        !reset_this_cycle && !write_this_cycle && st_state == STATE_SPECIAL_OPCODE;
+    assign special_opcode_this_cycle = rst_n && !write_this_cycle && state_is_special_opcode;
 
     assign special_opcode_end_this_cycle =
         special_opcode_this_cycle && st_operand[7:0] < ph_line_range;
 
     assign parse_byte_this_cycle =
-        !reset_this_cycle && !write_this_cycle && !exec_current_instruction_this_cycle &&
+        rst_n && !write_this_cycle && !exec_current_instruction_this_cycle &&
         !special_opcode_this_cycle && !execution_paused && current_byte_valid;
 
-    assign parse_extended_opcode_this_cycle =
-        parse_byte_this_cycle && st_state == STATE_EXTENDED_OPCODE;
+    assign parse_extended_opcode_this_cycle = parse_byte_this_cycle && state_is_extended_opcode;
 
-    assign parse_standard_or_special_opcode_this_cycle =
-        parse_byte_this_cycle && st_state == STATE_READY;
+    assign parse_standard_or_special_opcode_this_cycle = parse_byte_this_cycle && state_is_ready;
 
     assign parse_standard_opcode_this_cycle =
         parse_standard_or_special_opcode_this_cycle && current_byte < ph_opcode_base;
@@ -180,13 +175,12 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign parse_special_opcode_or_constaddpc_this_cycle =
         parse_special_opcode_this_cycle ||
-        (parse_standard_opcode_this_cycle && current_byte == DW_LNS_CONSTADDPC);
+        (parse_standard_opcode_this_cycle && current_byte_is_lns_constaddpc);
 
     assign execution_paused =
-        st_state == STATE_PAUSE_FOR_COPY || st_state == STATE_PAUSE_FOR_END_SEQUENCE ||
-        st_state == STATE_PAUSE_FOR_ILLEGAL;
+        state_is_pause_for_copy || state_is_pause_for_end_sequence || state_is_pause_for_illegal;
 
-    assign write_status = write_this_cycle && address == STATUS;
+    assign write_status = write_this_cycle && address_is_status;
 
     logic set_st_state_ready;
     logic set_st_state_extended_opcode;
@@ -213,91 +207,83 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign set_st_state_ready =
         reset_this_cycle || write_program_header || write_status ||
-        (special_opcode_end_this_cycle && st_current_instruction == INSTR_CONSTADDPC) ||
-        (exec_current_instruction_this_cycle && st_current_instruction != INSTR_EXTENDED);
+        (special_opcode_end_this_cycle && current_instruction_is_constaddpc) ||
+        (exec_current_instruction_this_cycle && !current_instruction_is_extended);
 
     assign set_st_state_extended_opcode =
-        exec_current_instruction_this_cycle && st_current_instruction == INSTR_EXTENDED;
+        exec_current_instruction_this_cycle && current_instruction_is_extended;
 
     assign set_st_state_special_opcode =
         parse_special_opcode_or_constaddpc_this_cycle ||
-        (st_state == STATE_SPECIAL_OPCODE && !special_opcode_end_this_cycle);
+        (state_is_special_opcode && !special_opcode_end_this_cycle);
 
     assign set_st_state_pause_for_copy =
-        (parse_standard_or_special_opcode_this_cycle && current_byte == DW_LNS_COPY) ||
-        (special_opcode_end_this_cycle && st_current_instruction == INSTR_NOP);
+        (parse_standard_or_special_opcode_this_cycle && current_byte_is_lns_copy) ||
+        (special_opcode_end_this_cycle && current_instruction_is_nop);
 
     assign set_st_state_pause_for_end_sequence =
-        parse_extended_opcode_this_cycle && current_byte == DW_LNE_ENDSEQUENCE;
+        parse_extended_opcode_this_cycle && current_byte_is_lne_endsequence;
 
     assign set_st_state_pause_for_illegal =
-        (parse_extended_opcode_this_cycle && current_byte != DW_LNE_ENDSEQUENCE &&
-            current_byte != DW_LNE_SETADDRESS && current_byte != DW_LNE_SETDISCRIMINATOR) ||
-        (parse_standard_opcode_this_cycle && current_byte != DW_LNS_COPY &&
-            current_byte != DW_LNS_ADVANCEPC && current_byte != DW_LNS_ADVANCELINE &&
-            current_byte != DW_LNS_SETFILE && current_byte != DW_LNS_SETCOLUMN &&
-            current_byte != DW_LNS_NEGATESTMT && current_byte != DW_LNS_SETBASICBLOCK &&
-            current_byte != DW_LNS_CONSTADDPC && current_byte != DW_LNS_FIXEDADVANCEPC &&
-            current_byte != DW_LNS_SETPROLOGUEEND && current_byte != DW_LNS_SETEPILOGUEBEGIN &&
-            current_byte != DW_LNS_SETISA && current_byte != EXTENDED_OPCODE_START);
+        (parse_extended_opcode_this_cycle && !current_byte_is_lne_endsequence &&
+            !current_byte_is_lne_setaddress && !current_byte_is_lne_setdiscriminator) ||
+        (parse_standard_opcode_this_cycle && !current_byte_is_lns_copy &&
+            !current_byte_is_lns_advancepc && !current_byte_is_lns_advanceline &&
+            !current_byte_is_lns_setfile && !current_byte_is_lns_setcolumn &&
+            !current_byte_is_lns_negatestmt && !current_byte_is_lns_setbasicblock &&
+            !current_byte_is_lns_constaddpc && !current_byte_is_lns_fixedadvancepc &&
+            !current_byte_is_lns_setprologueend && !current_byte_is_lns_setepiloguebegin &&
+            !current_byte_is_lns_setisa && !current_byte_is_extended_opcode_start);
 
     assign set_st_state_parse_leb_128_byte0 =
-        (parse_extended_opcode_this_cycle && current_byte == DW_LNE_SETDISCRIMINATOR) ||
+        (parse_extended_opcode_this_cycle && current_byte_is_lne_setdiscriminator) ||
         (parse_standard_opcode_this_cycle && (
-            current_byte == DW_LNS_ADVANCEPC || current_byte == DW_LNS_ADVANCELINE ||
-            current_byte == DW_LNS_SETFILE || current_byte == DW_LNS_SETCOLUMN ||
-            current_byte == DW_LNS_SETISA || current_byte == EXTENDED_OPCODE_START));
+            current_byte_is_lns_advancepc || current_byte_is_lns_advanceline ||
+            current_byte_is_lns_setfile || current_byte_is_lns_setcolumn ||
+            current_byte_is_lns_setisa || current_byte_is_extended_opcode_start));
 
     assign set_st_state_parse_leb_128_byte1 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_LEB_128_BYTE0 && !leb_last_byte;
+        parse_byte_this_cycle && state_is_parse_leb_128_byte0 && !leb_last_byte;
 
     assign set_st_state_parse_leb_128_byte2 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_LEB_128_BYTE1 && !leb_last_byte;
+        parse_byte_this_cycle && state_is_parse_leb_128_byte1 && !leb_last_byte;
 
     assign set_st_state_parse_leb_128_byte3 =
-        parse_byte_this_cycle && !leb_last_byte && st_state == STATE_PARSE_LEB_128_BYTE2;
+        parse_byte_this_cycle && !leb_last_byte && state_is_parse_leb_128_byte2;
 
     assign set_st_state_parse_leb_128_overflow =
         parse_byte_this_cycle && !leb_last_byte &&
-        (st_state == STATE_PARSE_LEB_128_BYTE3 || st_state == STATE_PARSE_LEB_128_OVERFLOW);
+        (state_is_parse_leb_128_byte3 || state_is_parse_leb_128_overflow);
 
     assign set_st_state_parse_u16_byte0 =
-        parse_standard_opcode_this_cycle && current_byte == DW_LNS_FIXEDADVANCEPC;
+        parse_standard_opcode_this_cycle && current_byte_is_lne_fixedadvancepc;
 
-    assign set_st_state_parse_u16_byte1 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_U16_BYTE0;
+    assign set_st_state_parse_u16_byte1 = parse_byte_this_cycle && state_is_parse_u16_byte0;
 
     assign set_st_state_parse_u64_byte0 =
-        parse_extended_opcode_this_cycle && current_byte == DW_LNE_SETADDRESS;
+        parse_extended_opcode_this_cycle && current_byte_is_lne_setaddress;
 
-    assign set_st_state_parse_u64_byte1 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_U64_BYTE0;
+    assign set_st_state_parse_u64_byte1 = parse_byte_this_cycle && state_is_parse_u64_byte0;
 
-    assign set_st_state_parse_u64_byte2 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_U64_BYTE1;
+    assign set_st_state_parse_u64_byte2 = parse_byte_this_cycle && state_is_parse_u64_byte1;
 
-    assign set_st_state_parse_u64_byte3 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_U64_BYTE2;
+    assign set_st_state_parse_u64_byte3 = parse_byte_this_cycle && state_is_parse_u64_byte2;
 
-    assign set_st_state_parse_u64_byte4 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_U64_BYTE3;
+    assign set_st_state_parse_u64_byte4 = parse_byte_this_cycle && state_is_parse_u64_byte3;
 
-    assign set_st_state_parse_u64_byte5 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_U64_BYTE4;
+    assign set_st_state_parse_u64_byte5 = parse_byte_this_cycle && state_is_parse_u64_byte4;
 
-    assign set_st_state_parse_u64_byte6 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_U64_BYTE5;
+    assign set_st_state_parse_u64_byte6 = parse_byte_this_cycle && state_is_parse_u64_byte5;
 
-    assign set_st_state_parse_u64_byte7 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_U64_BYTE6;
+    assign set_st_state_parse_u64_byte7 = parse_byte_this_cycle && state_is_parse_u64_byte6;
 
     assign set_st_state_exec =
         parse_byte_this_cycle && (
             (leb_last_byte && (
-                st_state == STATE_PARSE_LEB_128_BYTE0 || st_state == STATE_PARSE_LEB_128_BYTE1 ||
-                st_state == STATE_PARSE_LEB_128_BYTE2 || st_state == STATE_PARSE_LEB_128_BYTE3 ||
-                st_state == STATE_PARSE_LEB_128_OVERFLOW)
-            ) || st_state == STATE_PARSE_U16_BYTE1 || st_state == STATE_PARSE_U64_BYTE7);
+                state_is_parse_leb_128_byte0 || state_is_parse_leb_128_byte1 ||
+                state_is_parse_leb_128_byte2 || state_is_parse_leb_128_byte3 ||
+                state_is_parse_leb_128_overflow)
+            ) || state_is_parse_u16_byte1 || state_is_parse_u64_byte7);
 
     // CURRENT INSTRUCTION
     // Instructions with operands and extended instructions cannot be executed on their first byte,
@@ -349,33 +335,33 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign set_current_instruction_nop =
         reset_this_cycle || write_program_header || write_status ||
-        (parse_standard_opcode_this_cycle && current_byte == DW_LNS_SETISA) ||
+        (parse_standard_opcode_this_cycle && current_byte_is_lns_setisa) ||
         parse_special_opcode_this_cycle;
 
     assign set_current_instruction_advancepc =
         parse_standard_opcode_this_cycle &&
-        (current_byte == DW_LNS_ADVANCEPC || current_byte == DW_LNS_FIXEDADVANCEPC);
+        (current_byte_is_lns_advancepc || current_byte_is_lns_fixedadvancepc);
 
     assign set_current_instruction_advanceline =
-        parse_standard_opcode_this_cycle && current_byte == DW_LNS_ADVANCELINE;
+        parse_standard_opcode_this_cycle && current_byte_is_lns_advanceline;
 
     assign set_current_instruction_setfile =
-        parse_standard_opcode_this_cycle && current_byte == DW_LNS_SETFILE;
+        parse_standard_opcode_this_cycle && current_byte_is_lns_setfile;
 
     assign set_current_instruction_setcolumn =
-        parse_standard_opcode_this_cycle && current_byte == DW_LNS_SETCOLUMN;
+        parse_standard_opcode_this_cycle && current_byte_is_lns_setcolumn;
 
     assign set_current_instruction_setconstaddpc =
-        parse_standard_opcode_this_cycle && current_byte == DW_LNS_CONSTADDPC;
+        parse_standard_opcode_this_cycle && current_byte_is_lns_constaddpc;
 
     assign set_current_instruction_extended =
-        parse_standard_opcode_this_cycle && current_byte == EXTENDED_OPCODE_START;
+        parse_standard_opcode_this_cycle && current_byte_is_extended_opcode_start;
 
     assign set_current_instruction_setaddress =
-        parse_extended_opcode_this_cycle && current_byte == DW_LNE_SETADDRESS;
+        parse_extended_opcode_this_cycle && current_byte_is_lne_setaddress;
 
     assign set_current_instruction_setdiscriminator =
-        parse_extended_opcode_this_cycle && current_byte == DW_LNE_SETDISCRIMINATOR;
+        parse_extended_opcode_this_cycle && current_byte_is_lne_setdiscriminator;
 
     // LEB SIGNED
     // When parsing an LEB encoded number, this records whether the number is signed, and therefore
@@ -389,13 +375,13 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     assign unset_leb_signed =
         reset_this_cycle || write_program_header || write_status ||
         (parse_standard_opcode_this_cycle && (
-            current_byte == DW_LNS_ADVANCEPC || current_byte == DW_LNS_SETFILE ||
-            current_byte == DW_LNS_SETCOLUMN || current_byte == DW_LNS_SETISA ||
-            current_byte == EXTENDED_OPCODE_START)) ||
-        (parse_extended_opcode_this_cycle && current_byte == DW_LNE_SETDISCRIMINATOR);
+            current_byte_is_lns_advancepc || current_byte_is_lns_setfile ||
+            current_byte_is_lns_setcolumn || current_byte_is_lns_setisa ||
+            current_byte_is_extended_opcode_start)) ||
+        (parse_extended_opcode_this_cycle && current_byte_is_lne_setdiscriminator);
 
     assign set_leb_signed =
-        parse_standard_opcode_this_cycle && current_byte == DW_LNS_ADVANCELINE;
+        parse_standard_opcode_this_cycle && current_byte_is_lns_advanceline;
 
     always_ff @(posedge clk) begin
         if      (unset_leb_signed) st_leb_signed <= 0;
@@ -418,7 +404,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic reset_st_ip;
 
     assign reset_st_ip = reset_this_cycle || write_program_header || write_program_code ||
-        (write_status && st_state == STATE_PAUSE_FOR_ILLEGAL);
+        (write_status && state_is_pause_for_illegal);
 
     // PROGRAM HEADER
     // Some parts of the DWARF line table program header have an impact on execution. These parts
@@ -458,11 +444,11 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic write_illegal_line_range;
     logic reset_ph_line_range;
 
-    assign write_program_header = write_this_cycle && address == PROGRAM_HEADER;
+    assign write_program_header = write_this_cycle && address_is_program_header;
 
     assign write_program_header_byte1 = write_program_header && data_write_n[1] != data_write_n[0];
 
-    assign write_program_header_byte2_byte3 = write_program_header && data_write_n == RW_32_BIT;
+    assign write_program_header_byte2_byte3 = write_program_header && data_write_32_bit;
 
     assign write_illegal_line_range =
         write_program_header && write_program_header_byte2_byte3 && !(|data_in[23:16]);
@@ -503,15 +489,15 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic write_program_code_four_bytes;
 
     assign reset_st_program_code = reset_this_cycle || write_program_header ||
-        (write_status && st_state == STATE_PAUSE_FOR_ILLEGAL);
+        (write_status && state_is_pause_for_illegal);
 
-    assign write_program_code = write_this_cycle && address == PROGRAM_CODE;
+    assign write_program_code = write_this_cycle && address_is_program_code;
 
-    assign write_program_code_one_byte = write_program_code && data_write_n == RW_8_BIT;
+    assign write_program_code_one_byte = write_program_code && data_write_8_bit;
 
-    assign write_program_code_two_bytes = write_program_code && data_write_n == RW_16_BIT;
+    assign write_program_code_two_bytes = write_program_code && data_write_16_bit;
 
-    assign write_program_code_four_bytes = write_program_code && data_write_n == RW_32_BIT;
+    assign write_program_code_four_bytes = write_program_code && data_write_32_bit;
 
     // CURRENT BYTE
     // The accelerator processes one byte per cycle. The current byte is the value of the byte
@@ -544,10 +530,10 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     always_comb begin
         case (st_ip)
-            3'h0:    current_byte_valid = st_program_code_valid != RW_NONE;
-            3'h1:    current_byte_valid = st_program_code_valid[0] != st_program_code_valid[1];
-            3'h2:    current_byte_valid = st_program_code_valid == RW_32_BIT;
-            3'h3:    current_byte_valid = st_program_code_valid == RW_32_BIT;
+            3'h0:    current_byte_valid = program_code_byte_0_valid;
+            3'h1:    current_byte_valid = program_code_byte_1_valid;
+            3'h2:    current_byte_valid = program_code_bytes_2_3_valid;
+            3'h3:    current_byte_valid = program_code_bytes_2_3_valid;
             default: current_byte_valid = 0;
         endcase
     end
@@ -606,36 +592,28 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic parse_uint_byte3;
 
     assign reset_st_operand = reset_this_cycle || write_program_header ||
-        (write_status && st_state == STATE_PAUSE_FOR_ILLEGAL);
+        (write_status && state_is_pause_for_illegal);
 
     assign set_st_operand_from_byte_subtractor =
         parse_special_opcode_or_constaddpc_this_cycle || special_opcode_this_cycle;
 
-    assign parse_leb_128_byte0 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_LEB_128_BYTE0;
+    assign parse_leb_128_byte0 = parse_byte_this_cycle && state_is_parse_leb_128_byte0;
 
-    assign parse_leb_128_byte1 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_LEB_128_BYTE1;
+    assign parse_leb_128_byte1 = parse_byte_this_cycle && state_is_parse_leb_128_byte1;
 
-    assign parse_leb_128_byte2 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_LEB_128_BYTE2;
+    assign parse_leb_128_byte2 = parse_byte_this_cycle && state_is_parse_leb_128_byte2;
 
-    assign parse_leb_128_byte3 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_LEB_128_BYTE3;
+    assign parse_leb_128_byte3 = parse_byte_this_cycle && state_is_parse_leb_128_byte3;
 
     assign parse_uint_byte0 =
-        parse_byte_this_cycle &&
-        (st_state == STATE_PARSE_U16_BYTE0 || st_state == STATE_PARSE_U64_BYTE0);
+        parse_byte_this_cycle && (state_is_parse_u16_byte0 || state_is_parse_u64_byte0);
 
     assign parse_uint_byte1 =
-        parse_byte_this_cycle &&
-        (st_state == STATE_PARSE_U16_BYTE1 || st_state == STATE_PARSE_U64_BYTE1);
+        parse_byte_this_cycle && (state_is_parse_u16_byte1 || state_is_parse_u64_byte1);
 
-    assign parse_uint_byte2 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_U64_BYTE2;
+    assign parse_uint_byte2 = parse_byte_this_cycle && state_is_parse_u64_byte2;
 
-    assign parse_uint_byte3 =
-        parse_byte_this_cycle && st_state == STATE_PARSE_U64_BYTE3;
+    assign parse_uint_byte3 = parse_byte_this_cycle && state_is_parse_u64_byte3;
 
     logic [27:0] byte_subtractor_dest_zero_extended;
     logic [7:0]  byte_subtractor_dest;
@@ -676,13 +654,13 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     assign reset_am_address =
         reset_this_cycle || write_program_header ||
         (write_status &&
-            (st_state == STATE_PAUSE_FOR_END_SEQUENCE || st_state == STATE_PAUSE_FOR_ILLEGAL));
+            (state_is_pause_for_end_sequence || state_is_pause_for_illegal));
 
     assign add_operand_to_am_address =
-        exec_current_instruction_this_cycle && st_current_instruction == INSTR_ADVANCEPC;
+        exec_current_instruction_this_cycle && current_instruction_is_advancepc;
 
     assign assign_operand_to_am_address =
-        exec_current_instruction_this_cycle && st_current_instruction == INSTR_SETADDRESS;
+        exec_current_instruction_this_cycle && current_instruction_is_setaddress;
 
     assign increment_am_address =
         special_opcode_this_cycle && !special_opcode_end_this_cycle;
@@ -704,11 +682,10 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign reset_am_file =
         reset_this_cycle || write_program_header ||
-        (write_status &&
-            (st_state == STATE_PAUSE_FOR_END_SEQUENCE || st_state == STATE_PAUSE_FOR_ILLEGAL));
+        (write_status && (state_is_pause_for_end_sequence || state_is_pause_for_illegal));
 
     assign assign_operand_to_am_file =
-        exec_current_instruction_this_cycle && st_current_instruction == INSTR_SETFILE;
+        exec_current_instruction_this_cycle && current_instruction_is_setfile;
 
     // ABSTRACT MACHINE LINE
     // The abstract machine address stores the line number calculated by the line table program.
@@ -727,11 +704,10 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign reset_am_line =
         reset_this_cycle || write_program_header ||
-        (write_status &&
-            (st_state == STATE_PAUSE_FOR_END_SEQUENCE || st_state == STATE_PAUSE_FOR_ILLEGAL));
+        (write_status && (state_is_pause_for_end_sequence || state_is_pause_for_illegal));
 
     assign add_src1_to_am_line =
-        (exec_current_instruction_this_cycle && st_current_instruction == INSTR_ADVANCELINE) ||
+        (exec_current_instruction_this_cycle && current_instruction_is_advanceline) ||
         parse_special_opcode_or_constaddpc_this_cycle || special_opcode_end_this_cycle;
 
     logic [27:0] sign_extended_line_base;
@@ -755,11 +731,10 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign reset_am_column =
         reset_this_cycle || write_program_header ||
-        (write_status &&
-            (st_state == STATE_PAUSE_FOR_END_SEQUENCE || st_state == STATE_PAUSE_FOR_ILLEGAL));
+        (write_status && (state_is_pause_for_end_sequence || state_is_pause_for_illegal));
 
     assign assign_operand_to_am_column =
-        exec_current_instruction_this_cycle && st_current_instruction == INSTR_SETCOLUMN;
+        exec_current_instruction_this_cycle && current_instruction_is_setcolumn;
 
     // ABSTRACT MACHINE IS STMT
     // The abstract machine flag marking the start of a statement.
@@ -777,11 +752,9 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic negate_am_is_stmt;
 
     assign reset_am_is_stmt_to_default =
-        (write_status &&
-            (st_state == STATE_PAUSE_FOR_END_SEQUENCE || st_state == STATE_PAUSE_FOR_ILLEGAL));
+        (write_status && (state_is_pause_for_end_sequence || state_is_pause_for_illegal));
 
-    assign negate_am_is_stmt =
-        parse_standard_opcode_this_cycle && current_byte == DW_LNS_NEGATESTMT;
+    assign negate_am_is_stmt = parse_standard_opcode_this_cycle && current_byte_is_lns_negatestmt;
 
     // ABSTRACT MACHINE BASIC BLOCK
     // The abstract machine flag marking the start of a basic block.
@@ -799,8 +772,8 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     assign reset_am_basic_block =
         reset_this_cycle || write_program_header || (write_status && execution_paused);
 
-    assign set_am_basic_block   =
-        parse_standard_opcode_this_cycle && current_byte == DW_LNS_SETBASICBLOCK;
+    assign set_am_basic_block =
+        parse_standard_opcode_this_cycle && current_byte_is_lns_setbasicblock;
 
     // ABSTRACT MACHINE END SEQUENCE
     // The abstract machine flag marking the byte after the end of a sequence of instructions.
@@ -817,11 +790,10 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign reset_am_end_sequence =
         reset_this_cycle || write_program_header ||
-        (write_status &&
-            (st_state == STATE_PAUSE_FOR_END_SEQUENCE || st_state == STATE_PAUSE_FOR_ILLEGAL));
+        (write_status && (state_is_pause_for_end_sequence || state_is_pause_for_illegal));
 
     assign set_am_end_sequence =
-        parse_extended_opcode_this_cycle && current_byte == DW_LNE_ENDSEQUENCE;
+        parse_extended_opcode_this_cycle && current_byte_is_lne_endsequence;
 
     // ABSTRACT MACHINE PROLOGUE END
     // The abstract machine flag marking the end of a function prologue.
@@ -840,7 +812,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
         reset_this_cycle || write_program_header || (write_status && execution_paused);
 
     assign set_am_prologue_end =
-        parse_standard_opcode_this_cycle && current_byte == DW_LNS_SETPROLOGUEEND;
+        parse_standard_opcode_this_cycle && current_byte_is_lns_setprologueend;
 
     // ABSTRACT MACHINE EPILOGUE BEGIN
     // The abstract machine flag marking the beginning of a function epilogue.
@@ -859,7 +831,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
         reset_this_cycle || write_program_header || (write_status && execution_paused);
 
     assign set_am_epilogue_begin =
-        parse_standard_opcode_this_cycle && current_byte == DW_LNS_SETEPILOGUEBEGIN;
+        parse_standard_opcode_this_cycle && current_byte_is_lns_setepiloguebegin;
 
     // ABSTRACT MACHINE DISCRIMINATOR
     // The abstract machine address stores an identifier calculated by the line table program.
@@ -880,7 +852,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
         reset_this_cycle || write_program_header || (write_status && execution_paused);
 
     assign assign_operand_to_am_discriminator =
-        exec_current_instruction_this_cycle && st_current_instruction == INSTR_SETDISCRIMINATOR;
+        exec_current_instruction_this_cycle && current_instruction_is_discriminator;
 
     // STATUS CODE
     // This logic manages the status code exposed to software through the STATUS register.
@@ -899,12 +871,12 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign set_out_status_ready =
         reset_this_cycle || write_program_header || write_status ||
-        (out_status == STATUS_BUSY && st_state == STATE_READY && !current_byte_valid);
+        (out_status == STATUS_BUSY && state_is_ready && !current_byte_valid);
 
     assign set_out_status_emit_row =
-        (parse_standard_opcode_this_cycle && current_byte == DW_LNS_COPY) ||
-        (parse_extended_opcode_this_cycle && current_byte == DW_LNE_ENDSEQUENCE) ||
-        (special_opcode_end_this_cycle && st_current_instruction == INSTR_NOP);
+        (parse_standard_opcode_this_cycle && current_byte_is_lns_copy) ||
+        (parse_extended_opcode_this_cycle && current_byte_is_lne_endsequence) ||
+        (special_opcode_end_this_cycle && current_instruction_is_nop);
 
     // REGISTER OUTPUTS
     // This logic composes the internal state into the format of the public facing memory mapped
@@ -912,9 +884,9 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     localparam VERSION_INFO = 32'h00000155;
 
-    assign data_out[7:0]   = register_read_byte0       ? out_selected_register[7:0]   : 8'h0;
-    assign data_out[15:8]  = register_read_byte1       ? out_selected_register[15:8]  : 8'h0;
-    assign data_out[31:16] = register_read_byte2_byte3 ? out_selected_register[31:16] : 16'h0;
+    assign data_out[7:0]   = data_read_byte_0_valid   ? out_selected_register[7:0]   : 8'h0;
+    assign data_out[15:8]  = data_read_byte_1_valid   ? out_selected_register[15:8]  : 8'h0;
+    assign data_out[31:16] = data_read_byte_2_3_valid ? out_selected_register[31:16] : 16'h0;
     assign data_ready      = 1;
 
     logic [31:0] out_selected_register;
@@ -922,9 +894,6 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic [31:0] out_am_address;
     logic [31:0] out_am_file_descrim;
     logic [31:0] out_am_line_col_flags;
-    logic        register_read_byte0;
-    logic        register_read_byte1;
-    logic        register_read_byte2_byte3;
 
     always_comb begin
         case (address)
@@ -951,12 +920,6 @@ module tqvp_laurie_dwarf_line_table_accelerator(
         am_column, am_line
     };
 
-    assign register_read_byte0 = data_read_n != RW_NONE;
-
-    assign register_read_byte1 = data_read_n[0] != data_read_n[1];
-
-    assign register_read_byte2_byte3 = data_read_n == RW_32_BIT;
-
     // INTERRUPT OUTPUT
     // This logic manages when to signal an interrupt to the host process.
 
@@ -975,11 +938,14 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     assign clear_interrupt = reset_this_cycle || write_status || special_opcode_end_this_cycle;
 
     assign raise_interrupt =
-        (parse_standard_opcode_this_cycle && current_byte == DW_LNS_COPY) ||
-        (parse_extended_opcode_this_cycle && current_byte == DW_LNE_ENDSEQUENCE) ||
+        (parse_standard_opcode_this_cycle && current_byte_is_lns_copy) ||
+        (parse_extended_opcode_this_cycle && current_byte_is_lne_endsequence) ||
         parse_special_opcode_or_constaddpc_this_cycle || set_st_state_pause_for_illegal;
 
     // SHARED ADDERS
+    // There are several places using a general adder, and a couple using a special case adder where
+    // one of the operands are always run, and many of these cases will not run in the same cycle.
+    // These adders are a shared resource.
 
     logic [27:0] main_adder_dest;
     logic [27:0] main_adder_src0;
@@ -1005,6 +971,147 @@ module tqvp_laurie_dwarf_line_table_accelerator(
         parse_byte_this_cycle ? { 25'h0, st_ip } :
         increment_am_address  ? am_address :
         28'h0;
+
+    // COMMON COMPARISONS
+    // A series of common comparisons, done in one place.
+
+    logic data_write_active;
+    logic data_write_8_bit;
+    logic data_write_16_bit;
+    logic data_write_32_bit;
+
+    assign data_write_active = !(&data_write_n);
+    assign data_write_8_bit  = data_write_n == RW_8_BIT;
+    assign data_write_16_bit = data_write_n == RW_16_BIT;
+    assign data_write_32_bit = data_write_n == RW_32_BIT;
+
+    logic data_read_byte_0_valid;
+    logic data_read_byte_1_valid;
+    logic data_read_byte_2_3_valid;
+
+    assign data_read_byte_0_valid   = !(&data_read_n);
+    assign data_read_byte_1_valid   = data_read_n[0] != data_read_n[1];
+    assign data_read_byte_2_3_valid = data_read_n == RW_32_BIT;
+
+    logic program_code_byte_0_valid;
+    logic program_code_byte_1_valid;
+    logic program_code_bytes_2_3_valid;
+
+    assign program_code_byte_0_valid    = !(&st_program_code_valid);
+    assign program_code_byte_1_valid    = st_program_code_valid[0] != st_program_code_valid[1];
+    assign program_code_bytes_2_3_valid = st_program_code_valid == RW_32_BIT;
+
+    logic state_is_exec;
+    logic state_is_special_opcode;
+    logic state_is_extended_opcode;
+    logic state_is_ready;
+    logic state_is_pause_for_copy;
+    logic state_is_pause_for_end_sequence;
+    logic state_is_pause_for_illegal;
+    logic state_is_parse_leb_128_byte0;
+    logic state_is_parse_leb_128_byte1;
+    logic state_is_parse_leb_128_byte2;
+    logic state_is_parse_leb_128_byte3;
+    logic state_is_parse_leb_128_overflow;
+    logic state_is_parse_u16_byte0;
+    logic state_is_parse_u16_byte1;
+    logic state_is_parse_u64_byte0;
+    logic state_is_parse_u64_byte1;
+    logic state_is_parse_u64_byte2;
+    logic state_is_parse_u64_byte3;
+    logic state_is_parse_u64_byte4;
+    logic state_is_parse_u64_byte5;
+    logic state_is_parse_u64_byte6;
+    logic state_is_parse_u64_byte7;
+
+    assign state_is_exec                   = st_state == STATE_EXEC;
+    assign state_is_special_opcode         = st_state == STATE_SPECIAL_OPCODE;
+    assign state_is_extended_opcode        = st_state == STATE_EXTENDED_OPCODE;
+    assign state_is_ready                  = st_state == STATE_READY;
+    assign state_is_pause_for_copy         = st_state == STATE_PAUSE_FOR_COPY;
+    assign state_is_pause_for_end_sequence = st_state == STATE_PAUSE_FOR_END_SEQUENCE;
+    assign state_is_pause_for_illegal      = st_state == STATE_PAUSE_FOR_ILLEGAL;
+    assign state_is_parse_leb_128_byte0    = st_state == STATE_PARSE_LEB_128_BYTE0;
+    assign state_is_parse_leb_128_byte1    = st_state == STATE_PARSE_LEB_128_BYTE1;
+    assign state_is_parse_leb_128_byte2    = st_state == STATE_PARSE_LEB_128_BYTE2;
+    assign state_is_parse_leb_128_byte3    = st_state == STATE_PARSE_LEB_128_BYTE3;
+    assign state_is_parse_leb_128_overflow = st_state == STATE_PARSE_LEB_128_OVERFLOW;
+    assign state_is_parse_u16_byte0        = st_state == STATE_PARSE_U16_BYTE0;
+    assign state_is_parse_u16_byte1        = st_state == STATE_PARSE_U16_BYTE1;
+    assign state_is_parse_u64_byte0        = st_state == STATE_PARSE_U64_BYTE0;
+    assign state_is_parse_u64_byte1        = st_state == STATE_PARSE_U64_BYTE1;
+    assign state_is_parse_u64_byte2        = st_state == STATE_PARSE_U64_BYTE2;
+    assign state_is_parse_u64_byte3        = st_state == STATE_PARSE_U64_BYTE3;
+    assign state_is_parse_u64_byte4        = st_state == STATE_PARSE_U64_BYTE4;
+    assign state_is_parse_u64_byte5        = st_state == STATE_PARSE_U64_BYTE5;
+    assign state_is_parse_u64_byte6        = st_state == STATE_PARSE_U64_BYTE6;
+    assign state_is_parse_u64_byte7        = st_state == STATE_PARSE_U64_BYTE7;
+
+    logic current_byte_is_lns_copy;
+    logic current_byte_is_lns_advancepc;
+    logic current_byte_is_lns_advanceline;
+    logic current_byte_is_lns_setfile;
+    logic current_byte_is_lns_setcolumn;
+    logic current_byte_is_lns_negatestmt;
+    logic current_byte_is_lns_setbasicblock;
+    logic current_byte_is_lns_constaddpc;
+    logic current_byte_is_lns_fixedadvancepc;
+    logic current_byte_is_lns_setprologueend;
+    logic current_byte_is_lns_setepiloguebegin;
+    logic current_byte_is_lns_setisa;
+
+    assign current_byte_is_lns_copy             = current_byte == DW_LNS_COPY;
+    assign current_byte_is_lns_advancepc        = current_byte == DW_LNS_ADVANCEPC;
+    assign current_byte_is_lns_advanceline      = current_byte == DW_LNS_ADVANCELINE;
+    assign current_byte_is_lns_setfile          = current_byte == DW_LNS_SETFILE;
+    assign current_byte_is_lns_setcolumn        = current_byte == DW_LNS_SETCOLUMN;
+    assign current_byte_is_lns_negatestmt       = current_byte == DW_LNS_NEGATESTMT;
+    assign current_byte_is_lns_setbasicblock    = current_byte == DW_LNS_SETBASICBLOCK;
+    assign current_byte_is_lns_constaddpc       = current_byte == DW_LNS_CONSTADDPC;
+    assign current_byte_is_lns_fixedadvancepc   = current_byte == DW_LNS_FIXEDADVANCEPC;
+    assign current_byte_is_lns_setprologueend   = current_byte == DW_LNS_SETPROLOGUEEND;
+    assign current_byte_is_lns_setepiloguebegin = current_byte == DW_LNS_SETEPILOGUEBEGIN;
+    assign current_byte_is_lns_setisa           = current_byte == DW_LNS_SETISA;
+
+    logic current_byte_is_extended_opcode_start;
+    logic current_byte_is_lne_endsequence;
+    logic current_byte_is_lne_setaddress;
+    logic current_byte_is_lne_setdiscriminator;
+    logic current_byte_is_lne_fixedadvancepc;
+
+    assign current_byte_is_extended_opcode_start = current_byte == EXTENDED_OPCODE_START;
+    assign current_byte_is_lne_endsequence       = current_byte == DW_LNE_ENDSEQUENCE;
+    assign current_byte_is_lne_setaddress        = current_byte == DW_LNE_SETADDRESS;
+    assign current_byte_is_lne_setdiscriminator  = current_byte == DW_LNE_SETDISCRIMINATOR;
+    assign current_byte_is_lne_fixedadvancepc    = current_byte == DW_LNS_FIXEDADVANCEPC;
+
+    logic address_is_status;
+    logic address_is_program_header;
+    logic address_is_program_code;
+
+    assign address_is_status         = address == STATUS;
+    assign address_is_program_header = address == PROGRAM_HEADER;
+    assign address_is_program_code   = address == PROGRAM_CODE;
+
+    logic current_instruction_is_nop;
+    logic current_instruction_is_constaddpc;
+    logic current_instruction_is_extended;
+    logic current_instruction_is_advancepc;
+    logic current_instruction_is_setaddress;
+    logic current_instruction_is_setfile;
+    logic current_instruction_is_advanceline;
+    logic current_instruction_is_setcolumn;
+    logic current_instruction_is_discriminator;
+
+    assign current_instruction_is_nop           = st_current_instruction == INSTR_NOP;
+    assign current_instruction_is_constaddpc    = st_current_instruction == INSTR_CONSTADDPC;
+    assign current_instruction_is_extended      = st_current_instruction == INSTR_EXTENDED;
+    assign current_instruction_is_advancepc     = st_current_instruction == INSTR_ADVANCEPC;
+    assign current_instruction_is_setaddress    = st_current_instruction == INSTR_SETADDRESS;
+    assign current_instruction_is_setfile       = st_current_instruction == INSTR_SETFILE;
+    assign current_instruction_is_advanceline   = st_current_instruction == INSTR_ADVANCELINE;
+    assign current_instruction_is_setcolumn     = st_current_instruction == INSTR_SETCOLUMN;
+    assign current_instruction_is_discriminator = st_current_instruction == INSTR_SETDISCRIMINATOR;
 
     // UNUSED
     // Pmod interface is unused. Drive the outputs to 0 and mark the Pmod inputs as unused to avoid
