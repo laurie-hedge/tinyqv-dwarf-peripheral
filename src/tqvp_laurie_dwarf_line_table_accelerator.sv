@@ -948,7 +948,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     // SHARED ADDERS
     // There are several places using a general adder, and a couple using a special case adder where
-    // one of the operands are always run, and many of these cases will not run in the same cycle.
+    // one of the operands is always one, and many of these cases will not run in the same cycle.
     // These adders are a shared resource.
 
     logic [27:0] main_adder_dest;
