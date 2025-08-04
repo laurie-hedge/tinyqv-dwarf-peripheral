@@ -231,7 +231,9 @@ bool HardwareSim::run_to_emit_row_or_illegal() {
 		if (timeout == 0) {
 			return false;
 		}
-		if (status != STATUS_READY) {
+		if (status == STATUS_PAUSED) {
+			write_dword(STATUS, 0);
+		} else if (status == STATUS_EMIT_ROW || status == STATUS_ILLEGAL) {
 			break;
 		}
 	}

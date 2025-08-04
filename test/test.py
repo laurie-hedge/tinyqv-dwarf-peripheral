@@ -26,6 +26,7 @@ class StatusCode:
     EMIT_ROW = 1
     BUSY     = 2
     ILLEGAL  = 3
+    PAUSED   = 4
 
 class StandardOpcode:
     DwLnsCopy             = 0x01
@@ -138,7 +139,6 @@ async def test_dw_lns_copy(dut):
     await ClockCycles(dut.clk, 5)
     assert await tqv.is_interrupt_asserted()
     await tqv.write_hword_reg(MmReg.STATUS, 1)
-    assert not await tqv.is_interrupt_asserted()
     await ClockCycles(dut.clk, 1)
     assert await tqv.is_interrupt_asserted()
     await tqv.write_byte_reg(MmReg.STATUS, 254)
@@ -405,7 +405,10 @@ async def test_dw_lns_const_add_pc(dut):
     await tqv.write_word_reg(MmReg.PROGRAM_HEADER, 0x0D07FD00)
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 8) | StandardOpcode.DwLnsConstAddPc)
     assert await wait_for_interrupt(dut, tqv, 10)
-    assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 100)
+    assert await wait_for_status_code(dut, tqv, StatusCode.PAUSED, 100)
+    await tqv.write_byte_reg(MmReg.STATUS, 0)
+    assert await wait_for_interrupt(dut, tqv, 10)
+    assert await tqv.read_word_reg(MmReg.STATUS)     == StatusCode.EMIT_ROW
     assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 34
     assert await read_sm_line(tqv)                   == 1
     await tqv.write_byte_reg(MmReg.STATUS, 0)
@@ -413,8 +416,12 @@ async def test_dw_lns_const_add_pc(dut):
     # test multiple const add pc with line_base=-4 and line_range=25
     await tqv.write_word_reg(MmReg.PROGRAM_HEADER, 0x0D19FC00)
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 24) | (StandardOpcode.DwLnsConstAddPc << 16) | (StandardOpcode.DwLnsConstAddPc << 8) | StandardOpcode.DwLnsConstAddPc)
+    for i in range(3):
+        assert await wait_for_interrupt(dut, tqv, 10)
+        assert await wait_for_status_code(dut, tqv, StatusCode.PAUSED, 100)
+        await tqv.write_byte_reg(MmReg.STATUS, 0)
     assert await wait_for_interrupt(dut, tqv, 10)
-    assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 100)
+    assert await tqv.read_word_reg(MmReg.STATUS)     == StatusCode.EMIT_ROW
     assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 27
     assert await read_sm_line(tqv)                   == 1
     await tqv.write_byte_reg(MmReg.STATUS, 0)

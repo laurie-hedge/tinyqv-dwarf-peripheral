@@ -20,9 +20,9 @@ To execute a program, first write the PROGRAM_HEADER register with the fields ex
 
 Next, write the code of the program to the PROGRAM_CODE register in a loop. These writes can consist of 1, 2, or 4 bytes at a time, but all bytes must be part of the program. It is suggested to write as much of the program as possible using 4 byte writes, and only use 2 and 1 byte chunks for the remaining bytes at the tail of the program.
 
-As the program is written, the peripheral may raise interrupts in a few cases. First, if the program hits a long running instruction and so cannot keep up with the speed of writes to PROGRAM_CODE, it will raise an interrupt and set STATUS to STATUS_BUSY until all instructions received so far have been executed. The interrupt handler should poll STATUS until it reads a value other than STATUS_BUSY before continuing.
+As the program is written, the peripheral may raise interrupts in a few cases. First, if the program hits a long running instruction and so cannot keep up with the speed of writes to PROGRAM_CODE, it will raise an interrupt and set STATUS to STATUS_BUSY. The interrupt handler should poll STATUS until it reads a value other than STATUS_BUSY. If the new status is STATUS_PAUSED, then the program should write any value to STATUS to continue execution. For any other status, the program should handle this exactly the same as if this were the original status of of the interrupt.
 
-Second, when the program asks to emit a row of the line table, an interrupt will be raised with the STATUS set to STATUS_EMIT_ROW. This will pause the execution of the program, even if valid bytes still remain. This gives the interrupt handler the change to read the abstract machine state from the AM registers and emit a row. To continue execution, write any value to STATUS.
+Second, when the program asks to emit a row of the line table, an interrupt will be raised with the STATUS set to STATUS_EMIT_ROW. This will pause the execution of the program, even if valid bytes still remain. This gives the interrupt handler the chance to read the abstract machine state from the AM registers and emit a row. To continue execution, write any value to STATUS.
 
 Third, if a program hits an unknown instruction, it will raise an interrupt and set STATUS to STATUS_ILLEGAL. This error is unrecoverable. The program should be abandoned and the chip should be configured for its next program with a new write to PROGRAM_HEADER.
 
@@ -49,9 +49,8 @@ def handle_dwarf_line_table_interrupt():
 		file_descrim   = read_from_reg(AM_FILE_DISCRIM)
 		line_col_flags = read_from_reg(AM_LINE_COL_FLAGS)
 		unpack_and_emit_row(address, file_descrim, line_col_flags)
-		write_to_reg(STATUS, 0)
-	clear_interrupt_and_resume_main()
-
+	write_to_reg(STATUS, 0)
+	mret()
 ```
 
 ### Limitations
@@ -141,6 +140,7 @@ If the register has the value STATUS_ILLEGAL following an interrupt, it means th
 | 0x01 | STATUS_EMIT_ROW | Peripheral has raised an interrupt to indicate that a row has been emitted. Read the row from AM_ADDRESS, AM_FILE_DISCRIM, and AM_LINE_COL_FLAGS. |
 | 0x02 | STATUS_BUSY     | Peripheral is busy processing instructions and cannot accept writes to PROGRAM_CODE at this time. |
 | 0x03 | STATUS_ILLEGAL  | Peripheral has stopped due to hitting an illegal instruction. |
+| 0x04 | STATUS_PAUSED   | Peripheral hit a long running instruction but has now finished executing it so is ready to continue. |
 
 ### INFO
 

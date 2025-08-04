@@ -11,6 +11,7 @@
 #define STATUS_EMIT_ROW 0x1
 #define STATUS_BUSY     0x2
 #define STATUS_ILLEGAL  0x3
+#define STATUS_PAUSED   0x4
 
 #define DW_LNS_COPY             0x01
 #define DW_LNS_ADVANCEPC        0x02

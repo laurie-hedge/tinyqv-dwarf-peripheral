@@ -26,6 +26,7 @@ bool Testbench::run_test(Test *test) {
 }
 
 bool Testbench::compare_state() {
+	uint32_t status         = hwsim.read_dword(STATUS);
 	uint32_t address        = hwsim.read_dword(AM_ADDRESS);
 	uint32_t file_discrim   = hwsim.read_dword(AM_FILE_DISCRIM);
 	uint32_t line_col_flags = hwsim.read_dword(AM_LINE_COL_FLAGS);
@@ -40,6 +41,10 @@ bool Testbench::compare_state() {
 	bool epiloque_begin    = (line_col_flags >> 30) & 1;
 	uint16_t discriminator = file_discrim >> 16;
 
+	if (status != swsim.status) {
+		std::cerr << "mismatch on status: 0x" << std::hex << status << " (dut) != 0x" << (uint32_t)swsim.status << " (ref)\n";
+		return false;
+	}
 	if (address != swsim.address) {
 		std::cerr << "mismatch on address: 0x" << std::hex << address << " (dut) != 0x" << swsim.address << " (ref)\n";
 		return false;
