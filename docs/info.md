@@ -63,17 +63,21 @@ Since this peripheral was designed as a companion to the TinyQV CPU, it only sup
 * The `isa` register is not implemented since only RV32EC is supported.
 * The `DW_LNE_define_file` extended opcode, which is deprecated in DWARF v5, is unimplemented, since there is no sensible way of implementing this instruction in a peripheral without greatly extending its scope.
 
-## Register map
+## Registers
+
+Registers may be read or written with 1, 2, or 4 byte accesses. All accesses must be aligned. Unaligned reads always return 0, and unaligned writes are always discarded.
+
+### Register map
 
 | Address | Name              | Access | Description                                |
 |---------|-------------------|--------|--------------------------------------------|
 | 0x00    | PROGRAM_HEADER    | R/W    | DWARF line table program header.           |
-| 0x01    | PROGRAM_CODE      | WO     | DWARF line table program code.             |
-| 0x02    | AM_ADDRESS        | RO     | Abstract machine address.                  |
-| 0x03    | AM_FILE_DISCRIM   | RO     | Abstract machine file, and discriminator.  |
-| 0x04    | AM_LINE_COL_FLAGS | RO     | Abstract machine line, column, and flags.  |
-| 0x05    | STATUS            | R/W    | Status of the peripheral.                  |
-| 0x06    | INFO              | RO     | Peripheral version and DWARF file support. |
+| 0x04    | PROGRAM_CODE      | WO     | DWARF line table program code.             |
+| 0x08    | AM_ADDRESS        | RO     | Abstract machine address.                  |
+| 0x0C    | AM_FILE_DISCRIM   | RO     | Abstract machine file, and discriminator.  |
+| 0x10    | AM_LINE_COL_FLAGS | RO     | Abstract machine line, column, and flags.  |
+| 0x14    | STATUS            | R/W    | Status of the peripheral.                  |
+| 0x18    | INFO              | RO     | Peripheral version and DWARF file support. |
 
 ### PROGRAM_HEADER
 
@@ -90,6 +94,8 @@ Reading the register returns the fields of the currently configured program (i.e
 ### PROGRAM_CODE
 
 This register should be written with the line table program code. It can be written in 1, 2, or 4 byte chunks, but every byte written must be part of the program code (no padding) so if the program code is not a multiple of 4 bytes, the 1 or 2 byte variants must be used to write the last bytes.
+
+So long as the write is aligned and falls entirely within this register, it doesn't matter where the code is written to, so a single byte write to 0x04, 0x05, 0x06, or 0x07 would all be the same.
 
 ### AM_ADDRESS
 
@@ -119,9 +125,11 @@ It contains the line, column, is_stmt, basic_block, end_sequence, prologue_end, 
 
 ### STATUS
 
-This register contains the current state of the peripheral. It should generally be polled before writing to PROGRAM_CODE, to ensure that the peripheral is ready to receive more code and that any responses from the peripheral are handled. It can also be written with any value to continue after STATUS_EMIT_ROW.
+This register contains the current state of the peripheral. It should generally be polled before writing to PROGRAM_CODE, to ensure that the peripheral is ready to receive more code and that any responses from the peripheral are handled.
 
-**Status Codes**
+Writing any value with a valid aligned access to any part of this register will clear the STATUS_EMIT_ROW state and cause the peripheral to resume running.
+
+#### Status Codes
 
 | Code | Name            | Description |
 |------|-----------------|-------------|
@@ -130,7 +138,7 @@ This register contains the current state of the peripheral. It should generally 
 | 0x02 | STATUS_BUSY     | Peripheral is busy processing instructions and cannot accept writes to PROGRAM_CODE at this time. |
 | 0x03 | STATUS_ILLEGAL  | Peripheral has stopped due to hitting an illegal instruction. |
 
-**State Transitions**
+#### State Transitions
 
 ANY -> STATUS_READY
 _on reset_

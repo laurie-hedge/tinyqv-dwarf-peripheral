@@ -10,13 +10,13 @@ from tqv import TinyQV
 PERIPHERAL_NUM = 0
 
 class MmReg:
-    PROGRAM_HEADER    = 0
-    PROGRAM_CODE      = 1
-    AM_ADDRESS        = 2
-    AM_FILE_DISCRIM   = 3
-    AM_LINE_COL_FLAGS = 4
-    STATUS            = 5
-    INFO              = 6
+    PROGRAM_HEADER    = 0x00
+    PROGRAM_CODE      = 0x04
+    AM_ADDRESS        = 0x08
+    AM_FILE_DISCRIM   = 0x0C
+    AM_LINE_COL_FLAGS = 0x10
+    STATUS            = 0x14
+    INFO              = 0x18
 
 class StatusCode:
     READY    = 0
@@ -108,6 +108,322 @@ async def test_register_read_write_reset(dut):
     for illegal_reg in [i for i in range(64) if i not in real_registers]:
         await tqv.write_word_reg(illegal_reg, 0xFFFFFFFF)
         assert await tqv.read_word_reg(illegal_reg) == 0x0
+
+@cocotb.test()
+async def test_partial_program_header_access(dut):
+    clock = Clock(dut.clk, 100, units="ns")
+    cocotb.start_soon(clock.start())
+
+    tqv = TinyQV(dut, PERIPHERAL_NUM)
+    await tqv.reset()
+
+    # test write each byte of program header individually
+    assert await tqv.read_word_reg(MmReg.PROGRAM_HEADER) == 0x0D010000
+    await tqv.write_byte_reg(MmReg.PROGRAM_HEADER + 3, 0xAB)
+    assert await tqv.read_word_reg(MmReg.PROGRAM_HEADER) == 0xAB010000
+    await tqv.write_byte_reg(MmReg.PROGRAM_HEADER + 2, 0x00)
+    assert await tqv.read_word_reg(MmReg.PROGRAM_HEADER) == 0xAB010000
+    await tqv.write_byte_reg(MmReg.PROGRAM_HEADER + 1, 0xCD)
+    assert await tqv.read_word_reg(MmReg.PROGRAM_HEADER) == 0xAB01CD00
+    await tqv.write_byte_reg(MmReg.PROGRAM_HEADER, 0x0F)
+    assert await tqv.read_word_reg(MmReg.PROGRAM_HEADER) == 0xAB01CD01
+
+    # test write each nibble of the program header individually
+    await tqv.write_hword_reg(MmReg.PROGRAM_HEADER + 2, 0x3344)
+    assert await tqv.read_word_reg(MmReg.PROGRAM_HEADER) == 0x3344CD01
+    await tqv.write_hword_reg(MmReg.PROGRAM_HEADER, 0x5566)
+    assert await tqv.read_word_reg(MmReg.PROGRAM_HEADER) == 0x33445500
+
+    # test misaligned word writes of program header are ignored
+    for i in [1, 2, 3]:
+        await tqv.write_word_reg(MmReg.PROGRAM_HEADER + i, 0x11111111)
+        assert await tqv.read_word_reg(MmReg.PROGRAM_HEADER) == 0x33445500
+
+    # test misaligned nibble writes of program header are ignored
+    for i in [1, 3]:
+        await tqv.write_hword_reg(MmReg.PROGRAM_HEADER + i, 0x1111)
+        assert await tqv.read_word_reg(MmReg.PROGRAM_HEADER) == 0x33445500
+
+    # test read each byte of the program header individually
+    assert await tqv.read_byte_reg(MmReg.PROGRAM_HEADER) == 0x00
+    assert await tqv.read_byte_reg(MmReg.PROGRAM_HEADER + 1) == 0x55
+    assert await tqv.read_byte_reg(MmReg.PROGRAM_HEADER + 2) == 0x44
+    assert await tqv.read_byte_reg(MmReg.PROGRAM_HEADER + 3) == 0x33
+
+    # test read each nibble of the program header individually
+    assert await tqv.read_hword_reg(MmReg.PROGRAM_HEADER) == 0x5500
+    assert await tqv.read_hword_reg(MmReg.PROGRAM_HEADER + 2) == 0x3344
+
+    # test misaligned word reads of program header return 0
+    for i in [1, 2, 3]:
+        assert await tqv.read_word_reg(MmReg.PROGRAM_HEADER + i) == 0x0
+
+    # test misaligned nibble reads of program header return 0
+    for i in [1, 3]:
+        assert await tqv.read_hword_reg(MmReg.PROGRAM_HEADER + i) == 0x0
+
+@cocotb.test()
+async def test_partial_program_code_access(dut):
+    clock = Clock(dut.clk, 100, units="ns")
+    cocotb.start_soon(clock.start())
+
+    tqv = TinyQV(dut, PERIPHERAL_NUM)
+    await tqv.reset()
+
+    # test byte aligned writes to program code all behave the same
+    for i in [0, 1, 2, 3]:
+        await tqv.write_byte_reg(MmReg.PROGRAM_CODE + i, StandardOpcode.DwLnsCopy)
+        assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
+        await tqv.write_word_reg(MmReg.STATUS, 0)
+
+    # test nibble aligned writes to program code all behave the same
+    for i in [0, 2]:
+        await tqv.write_hword_reg(MmReg.PROGRAM_CODE + i, (StandardOpcode.DwLnsCopy << 8) | StandardOpcode.DwLnsSetBasicBlock)
+        assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
+        assert await read_am_basic_block(tqv) == 1
+        await tqv.write_word_reg(MmReg.STATUS, 0)
+
+    # test misaligned word writes to program code are ignored
+    await tqv.write_word_reg(MmReg.PROGRAM_CODE + 1, (StandardOpcode.DwLnsCopy << 16) | (StandardOpcode.DwLnsSetBasicBlock << 8) | StandardOpcode.DwLnsSetBasicBlock)
+    assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.READY
+    assert await read_am_basic_block(tqv)        == 0
+    await tqv.write_word_reg(MmReg.PROGRAM_CODE + 2, (StandardOpcode.DwLnsCopy << 8) | StandardOpcode.DwLnsSetBasicBlock)
+    assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.READY
+    assert await read_am_basic_block(tqv)        == 0
+    await tqv.write_word_reg(MmReg.PROGRAM_CODE + 3, StandardOpcode.DwLnsCopy)
+    assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.READY
+
+    # test misaligned nibble writes to program code are ignored
+    await tqv.write_hword_reg(MmReg.PROGRAM_CODE + 1, (StandardOpcode.DwLnsCopy << 8) | StandardOpcode.DwLnsSetBasicBlock)
+    assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.READY
+    assert await read_am_basic_block(tqv)        == 0
+    await tqv.write_hword_reg(MmReg.PROGRAM_CODE + 3, StandardOpcode.DwLnsCopy)
+    assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.READY
+
+    # test all reads from program code return 0
+    for i in range(4):
+        assert await tqv.read_byte_reg(MmReg.PROGRAM_CODE + i)  == 0x0
+        assert await tqv.read_hword_reg(MmReg.PROGRAM_CODE + i) == 0x0
+        assert await tqv.read_word_reg(MmReg.PROGRAM_CODE + i)  == 0x0
+
+@cocotb.test()
+async def test_partial_am_address_access(dut):
+    clock = Clock(dut.clk, 100, units="ns")
+    cocotb.start_soon(clock.start())
+
+    tqv = TinyQV(dut, PERIPHERAL_NUM)
+    await tqv.reset()
+
+    assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 0x0
+    await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0xF3A2A3 << 8) | StandardOpcode.DwLnsAdvancePc)
+    await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 8) | 0x55)
+    assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
+    assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 0xABCD123
+
+    # test read each byte of the address individually
+    assert await tqv.read_byte_reg(MmReg.AM_ADDRESS)     == 0x23
+    assert await tqv.read_byte_reg(MmReg.AM_ADDRESS + 1) == 0xD1
+    assert await tqv.read_byte_reg(MmReg.AM_ADDRESS + 2) == 0xBC
+    assert await tqv.read_byte_reg(MmReg.AM_ADDRESS + 3) == 0x0A
+
+    # test read each nibble of the address individually
+    assert await tqv.read_hword_reg(MmReg.AM_ADDRESS)     == 0xD123
+    assert await tqv.read_hword_reg(MmReg.AM_ADDRESS + 2) == 0x0ABC
+
+    # test misaligned word reads of address return 0
+    for i in [1, 2, 3]:
+        assert await tqv.read_word_reg(MmReg.AM_ADDRESS + i) == 0x0
+
+    # test misaligned nibble reads of address return 0
+    for i in [1, 3]:
+        assert await tqv.read_hword_reg(MmReg.AM_ADDRESS + i) == 0x0
+
+    # test all writes to address are ignored
+    for i in range(4):
+        await tqv.write_byte_reg(MmReg.AM_ADDRESS + i, 0x11)
+        assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 0xABCD123
+        await tqv.write_hword_reg(MmReg.AM_ADDRESS + i, 0x1111)
+        assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 0xABCD123
+        await tqv.write_word_reg(MmReg.AM_ADDRESS + i, 0x11111111)
+        assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 0xABCD123
+
+@cocotb.test()
+async def test_partial_am_file_discrim_access(dut):
+    clock = Clock(dut.clk, 100, units="ns")
+    cocotb.start_soon(clock.start())
+
+    tqv = TinyQV(dut, PERIPHERAL_NUM)
+    await tqv.reset()
+
+    assert await tqv.read_word_reg(MmReg.AM_FILE_DISCRIM) == 0x1
+    await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0x2D7CD << 8) | StandardOpcode.DwLnsSetFile)
+    await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0xB4 << 24) | (ExtendedOpcode.DwLneSetDiscriminator << 16) | (0x04 << 8) | ExtendedOpcode.START)
+    await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 8) | 0x24)
+    assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
+    assert await tqv.read_word_reg(MmReg.AM_FILE_DISCRIM) == 0x1234ABCD
+
+    # test read each byte of file/discrim individually
+    assert await tqv.read_byte_reg(MmReg.AM_FILE_DISCRIM)     == 0xCD
+    assert await tqv.read_byte_reg(MmReg.AM_FILE_DISCRIM + 1) == 0xAB
+    assert await tqv.read_byte_reg(MmReg.AM_FILE_DISCRIM + 2) == 0x34
+    assert await tqv.read_byte_reg(MmReg.AM_FILE_DISCRIM + 3) == 0x12
+
+    # test read each nibble of file/discrim individually
+    assert await tqv.read_hword_reg(MmReg.AM_FILE_DISCRIM)     == 0xABCD
+    assert await tqv.read_hword_reg(MmReg.AM_FILE_DISCRIM + 2) == 0x1234
+
+    # test misaligned word reads of file/discrim return 0
+    for i in [1, 2, 3]:
+        assert await tqv.read_word_reg(MmReg.AM_FILE_DISCRIM + i) == 0x0
+
+    # test misaligned nibble reads of file/discrim return 0
+    for i in [1, 3]:
+        assert await tqv.read_hword_reg(MmReg.AM_FILE_DISCRIM + i) == 0x0
+
+    # test all writes to file/discrim are ignored
+    for i in range(4):
+        await tqv.write_byte_reg(MmReg.AM_FILE_DISCRIM + i, 0x11)
+        assert await tqv.read_word_reg(MmReg.AM_FILE_DISCRIM) == 0x1234ABCD
+        await tqv.write_hword_reg(MmReg.AM_FILE_DISCRIM + i, 0x1111)
+        assert await tqv.read_word_reg(MmReg.AM_FILE_DISCRIM) == 0x1234ABCD
+        await tqv.write_word_reg(MmReg.AM_FILE_DISCRIM + i, 0x11111111)
+        assert await tqv.read_word_reg(MmReg.AM_FILE_DISCRIM) == 0x1234ABCD
+
+@cocotb.test()
+async def test_partial_am_line_col_flags_access(dut):
+    clock = Clock(dut.clk, 100, units="ns")
+    cocotb.start_soon(clock.start())
+
+    tqv = TinyQV(dut, PERIPHERAL_NUM)
+    await tqv.reset()
+
+    assert await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS) == 0x1
+    await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsSetColumn << 24) | (0x24B4 << 8) | StandardOpcode.DwLnsAdvanceLine)
+    await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 24) | (StandardOpcode.DwLnsSetPrologueEnd << 16) | 0x06B3)
+    assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
+    assert await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS) == 0x23331235
+
+    # test read each byte of line/col/flags individually
+    assert await tqv.read_byte_reg(MmReg.AM_LINE_COL_FLAGS)     == 0x35
+    assert await tqv.read_byte_reg(MmReg.AM_LINE_COL_FLAGS + 1) == 0x12
+    assert await tqv.read_byte_reg(MmReg.AM_LINE_COL_FLAGS + 2) == 0x33
+    assert await tqv.read_byte_reg(MmReg.AM_LINE_COL_FLAGS + 3) == 0x23
+
+    # test read each nibble of line/col/flags individually
+    assert await tqv.read_hword_reg(MmReg.AM_LINE_COL_FLAGS)     == 0x1235
+    assert await tqv.read_hword_reg(MmReg.AM_LINE_COL_FLAGS + 2) == 0x2333
+
+    # test misaligned word reads of line/col/flags return 0
+    for i in [1, 2, 3]:
+        assert await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS + i) == 0x0
+
+    # test misaligned nibble reads of line/col/flags return 0
+    for i in [1, 3]:
+        assert await tqv.read_hword_reg(MmReg.AM_LINE_COL_FLAGS + i) == 0x0
+
+    # test all writes to line/col/flags are ignored
+    for i in range(4):
+        await tqv.write_byte_reg(MmReg.AM_LINE_COL_FLAGS + i, 0x11)
+        assert await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS) == 0x23331235
+        await tqv.write_hword_reg(MmReg.AM_LINE_COL_FLAGS + i, 0x1111)
+        assert await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS) == 0x23331235
+        await tqv.write_word_reg(MmReg.AM_LINE_COL_FLAGS + i, 0x11111111)
+        assert await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS) == 0x23331235
+
+@cocotb.test()
+async def test_partial_status_access(dut):
+    clock = Clock(dut.clk, 100, units="ns")
+    cocotb.start_soon(clock.start())
+
+    tqv = TinyQV(dut, PERIPHERAL_NUM)
+    await tqv.reset()
+
+    assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.READY
+    await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
+    assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.EMIT_ROW
+
+    # test read each byte of status individually
+    assert await tqv.read_byte_reg(MmReg.STATUS)     == StatusCode.EMIT_ROW
+    assert await tqv.read_byte_reg(MmReg.STATUS + 1) == 0x00
+    assert await tqv.read_byte_reg(MmReg.STATUS + 2) == 0x00
+    assert await tqv.read_byte_reg(MmReg.STATUS + 3) == 0x00
+
+    # test read each nibble of status individually
+    assert await tqv.read_hword_reg(MmReg.STATUS)     == StatusCode.EMIT_ROW
+    assert await tqv.read_hword_reg(MmReg.STATUS + 2) == 0x0000
+
+    # test misaligned word reads of status return 0
+    for i in [1, 2, 3]:
+        assert await tqv.read_word_reg(MmReg.STATUS + i) == 0x0
+
+    # test misaligned nibble reads of status return 0
+    for i in [1, 3]:
+        assert await tqv.read_hword_reg(MmReg.STATUS + i) == 0x0
+
+    # test misaligned word writes to status are ignored
+    for i in [1, 2, 3]:
+        await tqv.write_word_reg(MmReg.STATUS + i, 0)
+        assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.EMIT_ROW
+
+    # test misaligned nibble writes to status are ignored
+    for i in [1, 3]:
+        await tqv.write_hword_reg(MmReg.STATUS + i, 0)
+        assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.EMIT_ROW
+
+    # test aligned word write to status is accepted
+    await tqv.write_word_reg(MmReg.STATUS, 0)
+    assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.READY
+
+    # test all byte writes to status are accepted
+    for i in range(4):
+        await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
+        assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.EMIT_ROW
+        await tqv.write_byte_reg(MmReg.STATUS, i)
+        assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.READY
+
+    # test all aligned nibble writes to status are accepted
+    for i in [0, 2]:
+        await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
+        assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.EMIT_ROW
+        await tqv.write_hword_reg(MmReg.STATUS, i)
+        assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.READY
+
+@cocotb.test()
+async def test_partial_info_access(dut):
+    clock = Clock(dut.clk, 100, units="ns")
+    cocotb.start_soon(clock.start())
+
+    tqv = TinyQV(dut, PERIPHERAL_NUM)
+    await tqv.reset()
+
+    assert await tqv.read_word_reg(MmReg.INFO) == 0x00000155
+
+    # test read each byte of info individually
+    assert await tqv.read_byte_reg(MmReg.INFO)     == 0x55
+    assert await tqv.read_byte_reg(MmReg.INFO + 1) == 0x01
+    assert await tqv.read_byte_reg(MmReg.INFO + 2) == 0x00
+    assert await tqv.read_byte_reg(MmReg.INFO + 3) == 0x00
+
+    # test read each nibble of info individually
+    assert await tqv.read_hword_reg(MmReg.INFO)     == 0x0155
+    assert await tqv.read_hword_reg(MmReg.INFO + 2) == 0x0000
+
+    # test misaligned word reads of info return 0
+    for i in [1, 2, 3]:
+        assert await tqv.read_word_reg(MmReg.INFO + i) == 0x0
+
+    # test misaligned nibble reads of info return 0
+    for i in [1, 3]:
+        assert await tqv.read_hword_reg(MmReg.INFO + i) == 0x0
+
+    # test all writes to info are ignored
+    for i in range(4):
+        await tqv.write_byte_reg(MmReg.INFO + i, 0x11)
+        assert await tqv.read_word_reg(MmReg.INFO) == 0x00000155
+        await tqv.write_hword_reg(MmReg.INFO + i, 0x1111)
+        assert await tqv.read_word_reg(MmReg.INFO) == 0x00000155
+        await tqv.write_word_reg(MmReg.INFO + i, 0x11111111)
+        assert await tqv.read_word_reg(MmReg.INFO) == 0x00000155
 
 @cocotb.test()
 async def test_dw_lns_copy(dut):
@@ -205,58 +521,58 @@ async def test_dw_lns_advance_line(dut):
     await tqv.reset()
 
     # test advance line with one byte positive operand
-    assert await read_sm_line(tqv) == 0x1
+    assert await read_am_line(tqv) == 0x1
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (2 << 8) | StandardOpcode.DwLnsAdvanceLine)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_line(tqv) == 0x3
+    assert await read_am_line(tqv) == 0x3
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test advance line with one byte negative operand
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (0x7F << 8) | StandardOpcode.DwLnsAdvanceLine)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_line(tqv) == 0x2
+    assert await read_am_line(tqv) == 0x2
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test advance line with two byte positive operand
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 24) | (0x1298 << 8) | StandardOpcode.DwLnsAdvanceLine)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_line(tqv) == 0x91A
+    assert await read_am_line(tqv) == 0x91A
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test advance line with two byte negative operand
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 24) | (0x6DE8 << 8) | StandardOpcode.DwLnsAdvanceLine)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_line(tqv) == 0x2
+    assert await read_am_line(tqv) == 0x2
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test advance line with three byte positive operand
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0x039298 << 8) | StandardOpcode.DwLnsAdvanceLine)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_line(tqv) == 0xC91A
+    assert await read_am_line(tqv) == 0xC91A
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test advance line with three byte negative operand
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0x7CEDE8 << 8) | StandardOpcode.DwLnsAdvanceLine)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_line(tqv) == 0x2
+    assert await read_am_line(tqv) == 0x2
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test underflow of line register
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (0x7B << 8) | StandardOpcode.DwLnsAdvanceLine)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_line(tqv) == 0xFFFD
+    assert await read_am_line(tqv) == 0xFFFD
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test overflow of line register
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (0x05 << 8) | StandardOpcode.DwLnsAdvanceLine)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_line(tqv) == 0x2
+    assert await read_am_line(tqv) == 0x2
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
 @cocotb.test()
@@ -268,31 +584,31 @@ async def test_dw_lns_set_file(dut):
     await tqv.reset()
 
     # test set file with one byte operand
-    assert await read_sm_file(tqv) == 0x1
+    assert await read_am_file(tqv) == 0x1
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (0x05 << 8) | StandardOpcode.DwLnsSetFile)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_file(tqv) == 0x5
+    assert await read_am_file(tqv) == 0x5
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test set file with two byte operand
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 24) | (0x0185 << 8) | StandardOpcode.DwLnsSetFile)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_file(tqv) == 0x85
+    assert await read_am_file(tqv) == 0x85
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test set file with three byte operand
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0x03A2B1 << 8) | StandardOpcode.DwLnsSetFile)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_file(tqv) == 0xD131
+    assert await read_am_file(tqv) == 0xD131
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test overflow file register
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0x07B3C4 << 8) | StandardOpcode.DwLnsSetFile)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_file(tqv) == 0xD9C4
+    assert await read_am_file(tqv) == 0xD9C4
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
 @cocotb.test()
@@ -304,24 +620,24 @@ async def test_dw_lns_set_column(dut):
     await tqv.reset()
 
     # test set column with one byte operand
-    assert await read_sm_column(tqv) == 0x0
+    assert await read_am_column(tqv) == 0x0
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (0x05 << 8) | StandardOpcode.DwLnsSetColumn)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_column(tqv) == 0x5
+    assert await read_am_column(tqv) == 0x5
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test set column with two byte operand
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 24) | (0x0185 << 8) | StandardOpcode.DwLnsSetColumn)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_column(tqv) == 0x85
+    assert await read_am_column(tqv) == 0x85
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test overflow column register
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0x03A2B1 << 8) | StandardOpcode.DwLnsSetColumn)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_column(tqv) == 0x131
+    assert await read_am_column(tqv) == 0x131
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
 @cocotb.test()
@@ -333,29 +649,29 @@ async def test_dw_lns_negate_stmt(dut):
     await tqv.reset()
 
     # test flip from 0 to 1
-    assert await read_sm_is_stmt(tqv) == 0
+    assert await read_am_is_stmt(tqv) == 0
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 8) | StandardOpcode.DwLnsNegateStmt)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_is_stmt(tqv) == 1
+    assert await read_am_is_stmt(tqv) == 1
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test flip from 1 to 0
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 8) | StandardOpcode.DwLnsNegateStmt)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_is_stmt(tqv) == 0
+    assert await read_am_is_stmt(tqv) == 0
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test two back to back flips
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsNegateStmt << 8) | StandardOpcode.DwLnsNegateStmt)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_is_stmt(tqv) == 0
+    assert await read_am_is_stmt(tqv) == 0
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test three back to back flips
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 24) | (StandardOpcode.DwLnsNegateStmt << 16) | (StandardOpcode.DwLnsNegateStmt << 8) | StandardOpcode.DwLnsNegateStmt)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_is_stmt(tqv) == 1
+    assert await read_am_is_stmt(tqv) == 1
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
 @cocotb.test()
@@ -367,20 +683,20 @@ async def test_dw_lns_set_basic_block(dut):
     await tqv.reset()
 
     # test setting basic block
-    assert await read_sm_basic_block(tqv) == 0
+    assert await read_am_basic_block(tqv) == 0
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 8) | StandardOpcode.DwLnsSetBasicBlock)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_basic_block(tqv) == 1
+    assert await read_am_basic_block(tqv) == 1
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test restart after copy reset basic block
-    assert await read_sm_basic_block(tqv) == 0
+    assert await read_am_basic_block(tqv) == 0
 
     # test setting basic block twice back to back
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsSetBasicBlock << 8) | StandardOpcode.DwLnsSetBasicBlock)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_basic_block(tqv) == 1
+    assert await read_am_basic_block(tqv) == 1
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
 @cocotb.test()
@@ -396,7 +712,7 @@ async def test_dw_lns_const_add_pc(dut):
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 8) | StandardOpcode.DwLnsConstAddPc)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 100)
     assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 34
-    assert await read_sm_line(tqv)                   == 1
+    assert await read_am_line(tqv)                   == 1
     await tqv.write_byte_reg(MmReg.STATUS, 0)
 
     # test multiple const add pc with line_base=-4 and line_range=25
@@ -404,7 +720,7 @@ async def test_dw_lns_const_add_pc(dut):
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 24) | (StandardOpcode.DwLnsConstAddPc << 16) | (StandardOpcode.DwLnsConstAddPc << 8) | StandardOpcode.DwLnsConstAddPc)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 100)
     assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 27
-    assert await read_sm_line(tqv)                   == 1
+    assert await read_am_line(tqv)                   == 1
     await tqv.write_byte_reg(MmReg.STATUS, 0)
 
 @cocotb.test()
@@ -437,20 +753,20 @@ async def test_dw_lns_set_prologue_end(dut):
     await tqv.reset()
 
     # test set prologue end
-    assert await read_sm_prologue_end(tqv) == 0
+    assert await read_am_prologue_end(tqv) == 0
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 8) | StandardOpcode.DwLnsSetPrologueEnd)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_prologue_end(tqv) == 1
+    assert await read_am_prologue_end(tqv) == 1
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test restart after copy reset prologue end
-    assert await read_sm_prologue_end(tqv) == 0
+    assert await read_am_prologue_end(tqv) == 0
 
     # test set prologue end twice back to back
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsSetPrologueEnd << 8) | StandardOpcode.DwLnsSetPrologueEnd)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_prologue_end(tqv) == 1
+    assert await read_am_prologue_end(tqv) == 1
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
 @cocotb.test()
@@ -462,20 +778,20 @@ async def test_dw_lns_set_epilogue_begin(dut):
     await tqv.reset()
 
     # test set epilogue begin
-    assert await read_sm_epilogue_begin(tqv) == 0
+    assert await read_am_epilogue_begin(tqv) == 0
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 8) | StandardOpcode.DwLnsSetEpilogueBegin)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_epilogue_begin(tqv) == 1
+    assert await read_am_epilogue_begin(tqv) == 1
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test restart after copy reset epilogue begin
-    assert await read_sm_epilogue_begin(tqv) == 0
+    assert await read_am_epilogue_begin(tqv) == 0
 
     # test set epilogue begin twice back to back
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsSetEpilogueBegin << 8) | StandardOpcode.DwLnsSetEpilogueBegin)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_epilogue_begin(tqv) == 1
+    assert await read_am_epilogue_begin(tqv) == 1
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
 @cocotb.test()
@@ -508,53 +824,53 @@ async def test_dw_lne_end_sequence(dut):
     await tqv.reset()
 
     # test end sequence sets end sequence flag
-    assert await read_sm_end_sequence(tqv) == 0
+    assert await read_am_end_sequence(tqv) == 0
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (0x01 << 8) | ExtendedOpcode.START)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, ExtendedOpcode.DwLneEndSequence)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_end_sequence(tqv) == 1
+    assert await read_am_end_sequence(tqv) == 1
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test restart after end sequence reset end sequence flag
-    assert await read_sm_epilogue_begin(tqv) == 0
+    assert await read_am_epilogue_begin(tqv) == 0
 
     # test end sequence resets entire state machine after restart
     await tqv.write_word_reg(MmReg.PROGRAM_HEADER, 0x0D010001)
     assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 0x0
-    assert await read_sm_file(tqv)           == 1
-    assert await read_sm_line(tqv)           == 1
-    assert await read_sm_column(tqv)         == 0
-    assert await read_sm_is_stmt(tqv)        == 1
-    assert await read_sm_basic_block(tqv)    == 0
-    assert await read_sm_end_sequence(tqv)   == 0
-    assert await read_sm_prologue_end(tqv)   == 0
-    assert await read_sm_epilogue_begin(tqv) == 0
-    assert await read_sm_discrim(tqv)        == 0
+    assert await read_am_file(tqv)           == 1
+    assert await read_am_line(tqv)           == 1
+    assert await read_am_column(tqv)         == 0
+    assert await read_am_is_stmt(tqv)        == 1
+    assert await read_am_basic_block(tqv)    == 0
+    assert await read_am_end_sequence(tqv)   == 0
+    assert await read_am_prologue_end(tqv)   == 0
+    assert await read_am_epilogue_begin(tqv) == 0
+    assert await read_am_discrim(tqv)        == 0
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0x04 << 24) | (StandardOpcode.DwLnsAdvanceLine << 16) | (0x0A << 8) | StandardOpcode.DwLnsSetFile)
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsSetBasicBlock << 24) | (StandardOpcode.DwLnsNegateStmt << 16) | (0x0B << 8) | StandardOpcode.DwLnsSetColumn)
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0x02 << 24) | (ExtendedOpcode.START << 16) | (StandardOpcode.DwLnsSetEpilogueBegin << 8) | StandardOpcode.DwLnsSetPrologueEnd)
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0x01 << 24) | (ExtendedOpcode.START << 16) | (0x06 << 8) | ExtendedOpcode.DwLneSetDiscriminator)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, ExtendedOpcode.DwLneEndSequence)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_file(tqv)           == 10
-    assert await read_sm_line(tqv)           == 5
-    assert await read_sm_column(tqv)         == 11
-    assert await read_sm_is_stmt(tqv)        == 0
-    assert await read_sm_basic_block(tqv)    == 1
-    assert await read_sm_end_sequence(tqv)   == 1
-    assert await read_sm_prologue_end(tqv)   == 1
-    assert await read_sm_epilogue_begin(tqv) == 1
-    assert await read_sm_discrim(tqv)        == 6
+    assert await read_am_file(tqv)           == 10
+    assert await read_am_line(tqv)           == 5
+    assert await read_am_column(tqv)         == 11
+    assert await read_am_is_stmt(tqv)        == 0
+    assert await read_am_basic_block(tqv)    == 1
+    assert await read_am_end_sequence(tqv)   == 1
+    assert await read_am_prologue_end(tqv)   == 1
+    assert await read_am_epilogue_begin(tqv) == 1
+    assert await read_am_discrim(tqv)        == 6
     await tqv.write_byte_reg(MmReg.STATUS, 1)
-    assert await read_sm_file(tqv)           == 1
-    assert await read_sm_line(tqv)           == 1
-    assert await read_sm_column(tqv)         == 0
-    assert await read_sm_is_stmt(tqv)        == 1
-    assert await read_sm_basic_block(tqv)    == 0
-    assert await read_sm_end_sequence(tqv)   == 0
-    assert await read_sm_prologue_end(tqv)   == 0
-    assert await read_sm_epilogue_begin(tqv) == 0
-    assert await read_sm_discrim(tqv)        == 0
+    assert await read_am_file(tqv)           == 1
+    assert await read_am_line(tqv)           == 1
+    assert await read_am_column(tqv)         == 0
+    assert await read_am_is_stmt(tqv)        == 1
+    assert await read_am_basic_block(tqv)    == 0
+    assert await read_am_end_sequence(tqv)   == 0
+    assert await read_am_prologue_end(tqv)   == 0
+    assert await read_am_epilogue_begin(tqv) == 0
+    assert await read_am_discrim(tqv)        == 0
 
 @cocotb.test()
 async def test_dw_lne_set_address(dut):
@@ -582,21 +898,21 @@ async def test_dw_lne_set_discriminator(dut):
     await tqv.reset()
 
     # test set discriminator
-    assert await read_sm_discrim(tqv) == 0
+    assert await read_am_discrim(tqv) == 0
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0x05 << 24) | (ExtendedOpcode.DwLneSetDiscriminator << 16) | (0x02 << 8) | ExtendedOpcode.START)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, StandardOpcode.DwLnsCopy)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_discrim(tqv) == 5
+    assert await read_am_discrim(tqv) == 5
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
     # test restart after copy reset discriminator register
-    assert await read_sm_discrim(tqv) == 0
+    assert await read_am_discrim(tqv) == 0
 
     # test overflow discriminator register
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0xFF << 24) | (ExtendedOpcode.DwLneSetDiscriminator << 16) | (0x05 << 8) | ExtendedOpcode.START)
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 24) | 0x7FFFFF)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_discrim(tqv) == 0xFFFF
+    assert await read_am_discrim(tqv) == 0xFFFF
     await tqv.write_byte_reg(MmReg.STATUS, 1)
 
 @cocotb.test()
@@ -623,15 +939,15 @@ async def test_dw_special_opcodes(dut):
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (ExtendedOpcode.START << 24) | (StandardOpcode.DwLnsSetEpilogueBegin << 16) | (StandardOpcode.DwLnsSetPrologueEnd << 8) | StandardOpcode.DwLnsSetBasicBlock)
     await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0xDC << 24) | (0x02 << 16) | (ExtendedOpcode.DwLneSetDiscriminator << 8) | 0x02)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 100)
-    assert await read_sm_basic_block(tqv)    == 1
-    assert await read_sm_prologue_end(tqv)   == 1
-    assert await read_sm_epilogue_begin(tqv) == 1
-    assert await read_sm_discrim(tqv)        == 2
+    assert await read_am_basic_block(tqv)    == 1
+    assert await read_am_prologue_end(tqv)   == 1
+    assert await read_am_epilogue_begin(tqv) == 1
+    assert await read_am_discrim(tqv)        == 2
     await tqv.write_byte_reg(MmReg.STATUS, 0)
-    assert await read_sm_basic_block(tqv)    == 0
-    assert await read_sm_prologue_end(tqv)   == 0
-    assert await read_sm_epilogue_begin(tqv) == 0
-    assert await read_sm_discrim(tqv)        == 0
+    assert await read_am_basic_block(tqv)    == 0
+    assert await read_am_prologue_end(tqv)   == 0
+    assert await read_am_epilogue_begin(tqv) == 0
+    assert await read_am_discrim(tqv)        == 0
 
 async def run_special_opcode_test(dut, tqv, opcode_base, line_base, line_range, opcode):
     adjusted_opcode  = opcode - opcode_base
@@ -641,7 +957,7 @@ async def run_special_opcode_test(dut, tqv, opcode_base, line_base, line_range, 
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, opcode)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 100)
     assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == expected_address
-    assert await read_sm_line(tqv)                   == expected_line
+    assert await read_am_line(tqv)                   == expected_line
     await tqv.write_byte_reg(MmReg.STATUS, 0)
 
 @cocotb.test()
@@ -657,23 +973,23 @@ async def test_illegal_instruction(dut):
         await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (0x09 << 8) | ExtendedOpcode.START)
         await tqv.write_byte_reg(MmReg.PROGRAM_CODE, illegal_opcode)
         assert await wait_for_status_code(dut, tqv, StatusCode.ILLEGAL, 10)
-        assert await read_sm_basic_block(tqv) == 0
+        assert await read_am_basic_block(tqv) == 0
         await tqv.write_byte_reg(MmReg.STATUS, 0)
         assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.READY
 
     # test valid code runs correctly after illegal
     await tqv.write_hword_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 8) | StandardOpcode.DwLnsSetBasicBlock)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
-    assert await read_sm_basic_block(tqv) == 1
+    assert await read_am_basic_block(tqv) == 1
     await tqv.write_byte_reg(MmReg.STATUS, 0)
     assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.READY
-    assert await read_sm_basic_block(tqv)        == 0
+    assert await read_am_basic_block(tqv)        == 0
 
     # test illegal standard opcodes
     await tqv.write_word_reg(MmReg.PROGRAM_HEADER, 0x0F010000)
     await tqv.write_byte_reg(MmReg.PROGRAM_CODE, 0x0E)
     assert await wait_for_status_code(dut, tqv, StatusCode.ILLEGAL, 10)
-    assert await read_sm_basic_block(tqv) == 0
+    assert await read_am_basic_block(tqv) == 0
     await tqv.write_byte_reg(MmReg.STATUS, 0)
     assert await tqv.read_word_reg(MmReg.STATUS) == StatusCode.READY
 
@@ -688,38 +1004,38 @@ async def wait_for_status_code(dut, tqv, status_code, timeout):
             timeout -= 1
     return False
 
-async def read_sm_line(tqv):
+async def read_am_line(tqv):
     line_col_flags = await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS)
     return line_col_flags & 0xFFFF
 
-async def read_sm_column(tqv):
+async def read_am_column(tqv):
     line_col_flags = await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS)
     return (line_col_flags >> 16) & 0x3FF
 
-async def read_sm_is_stmt(tqv):
+async def read_am_is_stmt(tqv):
     line_col_flags = await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS)
     return (line_col_flags >> 26) & 1
 
-async def read_sm_basic_block(tqv):
+async def read_am_basic_block(tqv):
     line_col_flags = await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS)
     return (line_col_flags >> 27) & 1
 
-async def read_sm_end_sequence(tqv):
+async def read_am_end_sequence(tqv):
     line_col_flags = await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS)
     return (line_col_flags >> 28) & 1
 
-async def read_sm_prologue_end(tqv):
+async def read_am_prologue_end(tqv):
     line_col_flags = await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS)
     return (line_col_flags >> 29) & 1
 
-async def read_sm_epilogue_begin(tqv):
+async def read_am_epilogue_begin(tqv):
     line_col_flags = await tqv.read_word_reg(MmReg.AM_LINE_COL_FLAGS)
     return (line_col_flags >> 30) & 1
 
-async def read_sm_file(tqv):
+async def read_am_file(tqv):
     file_descrim = await tqv.read_word_reg(MmReg.AM_FILE_DISCRIM)
     return file_descrim & 0xFFFF
 
-async def read_sm_discrim(tqv):
+async def read_am_discrim(tqv):
     file_descrim = await tqv.read_word_reg(MmReg.AM_FILE_DISCRIM)
     return (file_descrim >> 16) & 0xFFFF

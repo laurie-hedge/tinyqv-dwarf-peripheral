@@ -39,13 +39,13 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     // Public interface to memory mapped registers provided by the peripheral. Defined by the spec
     // for this peripheral.
 
-    localparam PROGRAM_HEADER    = 6'h0;
-    localparam PROGRAM_CODE      = 6'h1;
-    localparam AM_ADDRESS        = 6'h2;
-    localparam AM_FILE_DISCRIM   = 6'h3;
-    localparam AM_LINE_COL_FLAGS = 6'h4;
-    localparam STATUS            = 6'h5;
-    localparam INFO              = 6'h6;
+    localparam PROGRAM_HEADER    = 4'h0;
+    localparam PROGRAM_CODE      = 4'h1;
+    localparam AM_ADDRESS        = 4'h2;
+    localparam AM_FILE_DISCRIM   = 4'h3;
+    localparam AM_LINE_COL_FLAGS = 4'h4;
+    localparam STATUS            = 4'h5;
+    localparam INFO              = 4'h6;
 
     // PERIPHERAL STATUS CODES
     // Public interface, values read by software from the STATUS register. Defined by the spec for
@@ -151,7 +151,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign reset_this_cycle = !rst_n;
 
-    assign write_this_cycle = rst_n && data_write_active;
+    assign write_this_cycle = rst_n && data_write_active && data_write_valid_alignment;
 
     assign exec_current_instruction_this_cycle = rst_n && !write_this_cycle && state_is_exec;
 
@@ -416,46 +416,61 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     always_ff @(posedge clk) begin
         if      (reset_this_cycle)     ph_default_is_stmt <= 0;
-        else if (write_program_header) ph_default_is_stmt <= data_in[0];
+        else if (write_program_header) ph_default_is_stmt <= next_ph_default_is_stmt;
     end
 
     logic [7:0] ph_line_base;
 
     always_ff @(posedge clk) begin
-        if      (reset_this_cycle)           ph_line_base <= 8'h0;
-        else if (write_program_header_byte1) ph_line_base <= data_in[15:8];
+        if      (reset_this_cycle)     ph_line_base <= 8'h0;
+        else if (write_program_header) ph_line_base <= next_ph_line_base;
     end
 
     logic [7:0] ph_line_range;
 
     always_ff @(posedge clk) begin
-        if      (reset_ph_line_range)              ph_line_range <= 8'h01;
-        else if (write_program_header_byte2_byte3) ph_line_range <= data_in[23:16];
+        if      (reset_ph_line_range)  ph_line_range <= 8'h01;
+        else if (write_program_header) ph_line_range <= next_ph_line_range;
     end
 
     logic [7:0] ph_opcode_base;
 
     always_ff @(posedge clk) begin
-        if      (reset_this_cycle)                 ph_opcode_base <= 8'h0D;
-        else if (write_program_header_byte2_byte3) ph_opcode_base <= data_in[31:24];
+        if      (reset_this_cycle)     ph_opcode_base <= 8'h0D;
+        else if (write_program_header) ph_opcode_base <= next_ph_opcode_base;
     end
 
-    logic write_program_header;
-    logic write_program_header_byte1;
-    logic write_program_header_byte2_byte3;
-    logic write_illegal_line_range;
-    logic reset_ph_line_range;
+    logic       write_program_header;
+    logic       write_illegal_line_range;
+    logic       reset_ph_line_range;
+    logic       next_ph_default_is_stmt;
+    logic [7:0] next_ph_line_base;
+    logic [7:0] next_ph_line_range;
+    logic [7:0] next_ph_opcode_base;
 
     assign write_program_header = write_this_cycle && address_is_program_header;
 
-    assign write_program_header_byte1 = write_program_header && data_write_n[1] != data_write_n[0];
-
-    assign write_program_header_byte2_byte3 = write_program_header && data_write_32_bit;
-
-    assign write_illegal_line_range =
-        write_program_header && write_program_header_byte2_byte3 && !(|data_in[23:16]);
+    assign write_illegal_line_range = write_program_header && !(|next_ph_line_range);
 
     assign reset_ph_line_range = reset_this_cycle || write_illegal_line_range;
+
+    assign next_ph_default_is_stmt = write_byte0_from_byte0 ? data_in[0] : ph_default_is_stmt;
+
+    assign next_ph_line_base =
+        write_byte1_from_byte0 ? data_in[7:0] :
+        write_byte1_from_byte1 ? data_in[15:8] :
+                                 ph_line_base;
+
+    assign next_ph_line_range =
+        write_byte2_from_byte0 ? data_in[7:0] :
+        write_byte2_from_byte2 ? data_in[23:16] :
+                                 ph_line_range;
+
+    assign next_ph_opcode_base =
+        write_byte3_from_byte0 ? data_in[7:0] :
+        write_byte3_from_byte1 ? data_in[15:8] :
+        write_byte3_from_byte3 ? data_in[31:24] :
+                                 ph_opcode_base;
 
     // PROGRAM CODE
     // Program code can be written by the host CPU in groups of 1, 2 or 4 bytes. These are stored in
@@ -867,11 +882,23 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     localparam VERSION_INFO = 32'h00000155;
 
-    assign data_out[7:0]   = data_read_byte_0_valid   ? out_selected_register[7:0]   : 8'h0;
-    assign data_out[15:8]  = data_read_byte_1_valid   ? out_selected_register[15:8]  : 8'h0;
-    assign data_out[31:16] = data_read_byte_2_3_valid ? out_selected_register[31:16] : 16'h0;
-    assign data_ready      = 1;
+    assign data_out[7:0] =
+        read_byte0_from_byte0 ? out_register[7:0] : 
+        read_byte0_from_byte1 ? out_register[15:8] :
+        read_byte0_from_byte2 ? out_register[23:16] :
+        read_byte0_from_byte3 ? out_register[31:24] :
+                                8'h0;
 
+    assign data_out[15:8] =
+        read_byte1_from_byte1 ? out_register[15:8] :
+        read_byte1_from_byte3 ? out_register[31:24] :
+                                8'h0;
+
+    assign data_out[31:16] = read_byte2_3_from_byte2_3 ? out_register[31:16] : 16'h0;
+
+    assign data_ready = 1;
+
+    logic [31:0] out_register;
     logic [31:0] out_selected_register;
     logic [31:0] out_program_header;
     logic [31:0] out_am_address;
@@ -879,8 +906,10 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic [31:0] out_am_line_col_flags;
     logic [1:0]  out_status;
 
+    assign out_register = data_read_valid_alignment ? out_selected_register : 32'h0;
+
     always_comb begin
-        case (address)
+        case (address[5:2])
             PROGRAM_HEADER:    out_selected_register = out_program_header;
             AM_ADDRESS:        out_selected_register = out_am_address;
             AM_FILE_DISCRIM:   out_selected_register = out_am_file_descrim;
@@ -952,6 +981,16 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     // COMMON COMPARISONS
     // A series of common comparisons, done in one place.
 
+    logic data_write_valid_alignment;
+    logic data_read_valid_alignment;
+
+    assign data_write_valid_alignment =
+        data_write_8_bit || (data_write_16_bit && !address[0]) ||
+        (data_write_32_bit && !(|address[1:0]));
+    assign data_read_valid_alignment  =
+        data_read_8_bit || (data_read_16_bit && !address[0]) ||
+        (data_read_32_bit && !(|address[1:0]));
+
     logic data_write_active;
     logic data_write_8_bit;
     logic data_write_16_bit;
@@ -962,13 +1001,57 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     assign data_write_16_bit = data_write_n == RW_16_BIT;
     assign data_write_32_bit = data_write_n == RW_32_BIT;
 
-    logic data_read_byte_0_valid;
-    logic data_read_byte_1_valid;
-    logic data_read_byte_2_3_valid;
+    logic data_read_8_bit;
+    logic data_read_16_bit;
+    logic data_read_32_bit;
 
-    assign data_read_byte_0_valid   = !(&data_read_n);
-    assign data_read_byte_1_valid   = data_read_n[0] != data_read_n[1];
-    assign data_read_byte_2_3_valid = data_read_n == RW_32_BIT;
+    assign data_read_8_bit  = data_read_n == RW_8_BIT;
+    assign data_read_16_bit = data_read_n == RW_16_BIT;
+    assign data_read_32_bit = data_read_n == RW_32_BIT;
+
+    logic write_byte0_from_byte0;
+    logic write_byte1_from_byte0;
+    logic write_byte1_from_byte1;
+    logic write_byte2_from_byte0;
+    logic write_byte2_from_byte2;
+    logic write_byte3_from_byte0;
+    logic write_byte3_from_byte1;
+    logic write_byte3_from_byte3;
+
+    assign write_byte0_from_byte0 =
+        data_write_n == RW_32_BIT || (data_write_n == RW_16_BIT && !address[1]) ||
+        (data_write_n == RW_8_BIT && address[1:0] == 2'h0);
+    assign write_byte1_from_byte0 = data_write_n == RW_8_BIT && address[1:0] == 2'h1;
+    assign write_byte1_from_byte1 =
+        data_write_n == RW_32_BIT || (data_write_n == RW_16_BIT && !address[1]);
+    assign write_byte2_from_byte0 =
+        (data_write_n == RW_16_BIT && address[1]) ||
+        (data_write_n == RW_8_BIT && address[1:0] == 2'h2);
+    assign write_byte2_from_byte2 = data_write_n == RW_32_BIT;
+    assign write_byte3_from_byte0 = data_write_n == RW_8_BIT && address[1:0] == 2'h3;
+    assign write_byte3_from_byte1 = data_write_n == RW_16_BIT && address[1];
+    assign write_byte3_from_byte3 = write_byte2_from_byte2;
+
+    logic read_byte0_from_byte0;
+    logic read_byte0_from_byte1;
+    logic read_byte0_from_byte2;
+    logic read_byte0_from_byte3;
+    logic read_byte1_from_byte1;
+    logic read_byte1_from_byte3;
+    logic read_byte2_3_from_byte2_3;
+
+    assign read_byte0_from_byte0     =
+        data_read_n == RW_32_BIT || (data_read_n == RW_16_BIT && !address[1]) ||
+        (data_read_n == RW_8_BIT && address[1:0] == 2'h0);
+    assign read_byte0_from_byte1     = data_read_n == RW_8_BIT && address[1:0] == 2'h1;
+    assign read_byte0_from_byte2     =
+        (data_read_n == RW_16_BIT && address[1]) ||
+        (data_read_n == RW_8_BIT && address[1:0] == 2'h2);
+    assign read_byte0_from_byte3     = data_read_n == RW_8_BIT && address[1:0] == 2'h3;
+    assign read_byte1_from_byte1     =
+        data_read_n == RW_32_BIT || (data_read_n == RW_16_BIT && !address[1]);
+    assign read_byte1_from_byte3     = data_read_n == RW_16_BIT && address[1];
+    assign read_byte2_3_from_byte2_3 = data_read_n == RW_32_BIT;
 
     logic program_code_byte_0_valid;
     logic program_code_byte_1_valid;
@@ -1066,9 +1149,9 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic address_is_program_header;
     logic address_is_program_code;
 
-    assign address_is_status         = address == STATUS;
-    assign address_is_program_header = address == PROGRAM_HEADER;
-    assign address_is_program_code   = address == PROGRAM_CODE;
+    assign address_is_status         = address[5:2] == STATUS;
+    assign address_is_program_header = address[5:2] == PROGRAM_HEADER;
+    assign address_is_program_code   = address[5:2] == PROGRAM_CODE;
 
     logic current_instruction_is_nop;
     logic current_instruction_is_constaddpc;

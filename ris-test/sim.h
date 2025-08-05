@@ -11,7 +11,6 @@
 #define STATUS_EMIT_ROW 0x1
 #define STATUS_BUSY     0x2
 #define STATUS_ILLEGAL  0x3
-#define STATUS_PAUSED   0x4
 
 #define DW_LNS_COPY             0x01
 #define DW_LNS_ADVANCEPC        0x02
@@ -31,13 +30,13 @@
 #define DW_LNE_SETADDRESS       0x02
 #define DW_LNE_SETDISCRIMINATOR 0x04
 
-#define PROGRAM_HEADER    0x0
-#define PROGRAM_CODE      0x1
-#define AM_ADDRESS        0x2
-#define AM_FILE_DISCRIM   0x3
-#define AM_LINE_COL_FLAGS 0x4
-#define STATUS            0x5
-#define INFO              0x6
+#define PROGRAM_HEADER    0x00
+#define PROGRAM_CODE      0x04
+#define AM_ADDRESS        0x08
+#define AM_FILE_DISCRIM   0x0C
+#define AM_LINE_COL_FLAGS 0x10
+#define STATUS            0x14
+#define INFO              0x18
 
 class SoftwareSim
 {
