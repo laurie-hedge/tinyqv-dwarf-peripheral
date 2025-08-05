@@ -463,13 +463,13 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign next_ph_line_range =
         write_byte2_from_byte0 ? data_in[7:0] :
-        write_byte2_from_byte2 ? data_in[23:16] :
+        data_write_32_bit      ? data_in[23:16] :
                                  ph_line_range;
 
     assign next_ph_opcode_base =
         write_byte3_from_byte0 ? data_in[7:0] :
         write_byte3_from_byte1 ? data_in[15:8] :
-        write_byte3_from_byte3 ? data_in[31:24] :
+        data_write_32_bit      ? data_in[31:24] :
                                  ph_opcode_base;
 
     // PROGRAM CODE
@@ -894,7 +894,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
         read_byte1_from_byte3 ? out_register[31:24] :
                                 8'h0;
 
-    assign data_out[31:16] = read_byte2_3_from_byte2_3 ? out_register[31:16] : 16'h0;
+    assign data_out[31:16] = data_read_32_bit ? out_register[31:16] : 16'h0;
 
     assign data_ready = 1;
 
@@ -981,15 +981,29 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     // COMMON COMPARISONS
     // A series of common comparisons, done in one place.
 
+    logic address_2_byte_aligned;
+    logic address_4_byte_aligned;
+
+    assign address_2_byte_aligned = !address[0];
+    assign address_4_byte_aligned = !address[1] && address_2_byte_aligned;
+
+    logic address_1_offset;
+    logic address_2_offset;
+    logic address_3_offset;
+
+    assign address_1_offset = !address[1] && address[0];
+    assign address_2_offset = address_2_byte_aligned && !address_4_byte_aligned;
+    assign address_3_offset = address[0] && !address_1_offset;
+
     logic data_write_valid_alignment;
     logic data_read_valid_alignment;
 
     assign data_write_valid_alignment =
-        data_write_8_bit || (data_write_16_bit && !address[0]) ||
-        (data_write_32_bit && !(|address[1:0]));
+        data_write_8_bit || (data_write_16_bit && address_2_byte_aligned) ||
+        (data_write_32_bit && address_4_byte_aligned);
     assign data_read_valid_alignment  =
-        data_read_8_bit || (data_read_16_bit && !address[0]) ||
-        (data_read_32_bit && !(|address[1:0]));
+        data_read_8_bit || (data_read_16_bit && address_2_byte_aligned) ||
+        (data_read_32_bit && address_4_byte_aligned);
 
     logic data_write_active;
     logic data_write_8_bit;
@@ -1013,24 +1027,20 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic write_byte1_from_byte0;
     logic write_byte1_from_byte1;
     logic write_byte2_from_byte0;
-    logic write_byte2_from_byte2;
     logic write_byte3_from_byte0;
     logic write_byte3_from_byte1;
-    logic write_byte3_from_byte3;
 
     assign write_byte0_from_byte0 =
-        data_write_n == RW_32_BIT || (data_write_n == RW_16_BIT && !address[1]) ||
-        (data_write_n == RW_8_BIT && address[1:0] == 2'h0);
-    assign write_byte1_from_byte0 = data_write_n == RW_8_BIT && address[1:0] == 2'h1;
+        data_write_32_bit || (data_write_16_bit && address_4_byte_aligned) ||
+        (data_write_8_bit && address_4_byte_aligned);
+    assign write_byte1_from_byte0 = data_write_8_bit && address_1_offset;
     assign write_byte1_from_byte1 =
-        data_write_n == RW_32_BIT || (data_write_n == RW_16_BIT && !address[1]);
+        data_write_32_bit || (data_write_16_bit && address_4_byte_aligned);
     assign write_byte2_from_byte0 =
-        (data_write_n == RW_16_BIT && address[1]) ||
-        (data_write_n == RW_8_BIT && address[1:0] == 2'h2);
-    assign write_byte2_from_byte2 = data_write_n == RW_32_BIT;
-    assign write_byte3_from_byte0 = data_write_n == RW_8_BIT && address[1:0] == 2'h3;
-    assign write_byte3_from_byte1 = data_write_n == RW_16_BIT && address[1];
-    assign write_byte3_from_byte3 = write_byte2_from_byte2;
+        (data_write_16_bit && !address_4_byte_aligned) ||
+        (data_write_8_bit && address_2_offset);
+    assign write_byte3_from_byte0 = data_write_8_bit && address_3_offset;
+    assign write_byte3_from_byte1 = data_write_16_bit && !address_4_byte_aligned;
 
     logic read_byte0_from_byte0;
     logic read_byte0_from_byte1;
@@ -1038,20 +1048,18 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic read_byte0_from_byte3;
     logic read_byte1_from_byte1;
     logic read_byte1_from_byte3;
-    logic read_byte2_3_from_byte2_3;
 
-    assign read_byte0_from_byte0     =
-        data_read_n == RW_32_BIT || (data_read_n == RW_16_BIT && !address[1]) ||
-        (data_read_n == RW_8_BIT && address[1:0] == 2'h0);
-    assign read_byte0_from_byte1     = data_read_n == RW_8_BIT && address[1:0] == 2'h1;
-    assign read_byte0_from_byte2     =
-        (data_read_n == RW_16_BIT && address[1]) ||
-        (data_read_n == RW_8_BIT && address[1:0] == 2'h2);
-    assign read_byte0_from_byte3     = data_read_n == RW_8_BIT && address[1:0] == 2'h3;
-    assign read_byte1_from_byte1     =
-        data_read_n == RW_32_BIT || (data_read_n == RW_16_BIT && !address[1]);
-    assign read_byte1_from_byte3     = data_read_n == RW_16_BIT && address[1];
-    assign read_byte2_3_from_byte2_3 = data_read_n == RW_32_BIT;
+    assign read_byte0_from_byte0 =
+        data_read_32_bit || (data_read_16_bit && address_4_byte_aligned) ||
+        (data_read_8_bit && address_4_byte_aligned);
+    assign read_byte0_from_byte1 = data_read_8_bit && address_1_offset;
+    assign read_byte0_from_byte2 =
+        (data_read_16_bit && !address_4_byte_aligned) ||
+        (data_read_8_bit && address_2_offset);
+    assign read_byte0_from_byte3 = data_read_8_bit && address_3_offset;
+    assign read_byte1_from_byte1 =
+        data_read_32_bit || (data_read_16_bit && address_4_byte_aligned);
+    assign read_byte1_from_byte3 = data_read_16_bit && !address_4_byte_aligned;
 
     logic program_code_byte_0_valid;
     logic program_code_byte_1_valid;
