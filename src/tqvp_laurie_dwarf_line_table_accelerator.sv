@@ -208,7 +208,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic set_st_state_exec;
 
     assign set_st_state_ready =
-        reset_this_cycle || write_program_header || write_status ||
+        reset_for_rst_or_write_program_header_or_status ||
         (special_opcode_end_this_cycle && current_instruction_is_constaddpc) ||
         (exec_current_instruction_this_cycle && !current_instruction_is_extended);
 
@@ -336,7 +336,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic set_current_instruction_setdiscriminator;
 
     assign set_current_instruction_nop =
-        reset_this_cycle || write_program_header || write_status ||
+        reset_for_rst_or_write_program_header_or_status ||
         (parse_standard_opcode_this_cycle && current_byte_is_lns_setisa) ||
         parse_special_opcode_this_cycle;
 
@@ -375,7 +375,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic set_leb_signed;
 
     assign unset_leb_signed =
-        reset_this_cycle || write_program_header || write_status ||
+        reset_for_rst_or_write_program_header_or_status ||
         (parse_standard_opcode_this_cycle && (
             current_byte_is_lns_advancepc || current_byte_is_lns_setfile ||
             current_byte_is_lns_setcolumn || current_byte_is_lns_setisa ||
@@ -405,8 +405,8 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     logic reset_st_ip;
 
-    assign reset_st_ip = reset_this_cycle || write_program_header || write_program_code ||
-        (write_status && state_is_pause_for_illegal);
+    assign reset_st_ip =
+        reset_for_rst_or_write_program_header_or_status_from_illegal || write_program_code;
 
     // PROGRAM HEADER
     // Some parts of the DWARF line table program header have an impact on execution. These parts
@@ -486,27 +486,29 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic [1:0]  st_program_code_valid;
 
     always_ff @(posedge clk) begin
-        if      (reset_st_program_code) st_program_code_valid <= RW_NONE;
-        else if (write_program_code)    st_program_code_valid <= data_write_n;
+        if (reset_for_rst_or_write_program_header_or_status_from_illegal)
+            st_program_code_valid <= RW_NONE;
+        else if (write_program_code)
+            st_program_code_valid <= data_write_n;
     end
 
     logic [31:0] st_program_code_buffer;
 
     always_ff @(posedge clk) begin
-        if      (reset_st_program_code)         st_program_code_buffer <= 32'h0;
-        else if (write_program_code_one_byte)   st_program_code_buffer <= { 24'h0, data_in[7:0] };
-        else if (write_program_code_two_bytes)  st_program_code_buffer <= { 16'h0, data_in[15:0] };
-        else if (write_program_code_four_bytes) st_program_code_buffer <= data_in;
+        if (reset_for_rst_or_write_program_header_or_status_from_illegal)
+            st_program_code_buffer <= 32'h0;
+        else if (write_program_code_one_byte)
+            st_program_code_buffer <= { 24'h0, data_in[7:0] };
+        else if (write_program_code_two_bytes)
+            st_program_code_buffer <= { 16'h0, data_in[15:0] };
+        else if (write_program_code_four_bytes)
+            st_program_code_buffer <= data_in;
     end
 
-    logic reset_st_program_code;
     logic write_program_code;
     logic write_program_code_one_byte;
     logic write_program_code_two_bytes;
     logic write_program_code_four_bytes;
-
-    assign reset_st_program_code = reset_this_cycle || write_program_header ||
-        (write_status && state_is_pause_for_illegal);
 
     assign write_program_code = write_this_cycle && address_is_program_code;
 
@@ -564,7 +566,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic [27:0] st_operand;
 
     always_ff @(posedge clk) begin
-        if (reset_st_operand)
+        if (reset_for_rst_or_write_program_header_or_status_from_illegal)
             st_operand <= 28'h0;
         else if (set_st_operand_from_byte_subtractor)
             st_operand <= byte_subtractor_dest_zero_extended;
@@ -597,7 +599,6 @@ module tqvp_laurie_dwarf_line_table_accelerator(
             st_operand <= { current_byte[3:0], st_operand[23:0] };
     end
 
-    logic reset_st_operand;
     logic set_st_operand_from_byte_subtractor;
     logic parse_leb_128_byte0;
     logic parse_leb_128_byte1;
@@ -607,9 +608,6 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic parse_uint_byte1;
     logic parse_uint_byte2;
     logic parse_uint_byte3;
-
-    assign reset_st_operand = reset_this_cycle || write_program_header ||
-        (write_status && state_is_pause_for_illegal);
 
     assign set_st_operand_from_byte_subtractor =
         parse_special_opcode_or_constaddpc_this_cycle || special_opcode_this_cycle;
@@ -657,21 +655,19 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic [27:0] am_address;
 
     always_ff @(posedge clk) begin
-        if      (reset_am_address)             am_address <= 28'h0;
-        else if (add_operand_to_am_address)    am_address <= main_adder_dest;
-        else if (assign_operand_to_am_address) am_address <= st_operand[27:0];
-        else if (increment_am_address)         am_address <= incrementer_dest;
+        if (reset_for_rst_or_write_program_header_or_write_status_after_end_or_illegal)
+            am_address <= 28'h0;
+        else if (add_operand_to_am_address)
+            am_address <= main_adder_dest;
+        else if (assign_operand_to_am_address)
+            am_address <= st_operand[27:0];
+        else if (increment_am_address)
+            am_address <= incrementer_dest;
     end
 
-    logic reset_am_address;
     logic add_operand_to_am_address;
     logic assign_operand_to_am_address;
     logic increment_am_address;
-
-    assign reset_am_address =
-        reset_this_cycle || write_program_header ||
-        (write_status &&
-            (state_is_pause_for_end_sequence || state_is_pause_for_illegal));
 
     assign add_operand_to_am_address =
         exec_current_instruction_this_cycle && current_instruction_is_advancepc;
@@ -690,16 +686,13 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic [15:0] am_file;
 
     always_ff @(posedge clk) begin
-        if      (reset_am_file)             am_file <= 16'h1;
-        else if (assign_operand_to_am_file) am_file <= st_operand[15:0];
+        if (reset_for_rst_or_write_program_header_or_write_status_after_end_or_illegal)
+            am_file <= 16'h1;
+        else if (assign_operand_to_am_file)
+            am_file <= st_operand[15:0];
     end
 
-    logic reset_am_file;
     logic assign_operand_to_am_file;
-
-    assign reset_am_file =
-        reset_this_cycle || write_program_header ||
-        (write_status && (state_is_pause_for_end_sequence || state_is_pause_for_illegal));
 
     assign assign_operand_to_am_file =
         exec_current_instruction_this_cycle && current_instruction_is_setfile;
@@ -712,16 +705,13 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic [15:0] am_line;
 
     always_ff @(posedge clk) begin
-        if      (reset_am_line)       am_line <= 16'h1;
-        else if (add_src1_to_am_line) am_line <= main_adder_dest[15:0];
+        if      (reset_for_rst_or_write_program_header_or_write_status_after_end_or_illegal)
+            am_line <= 16'h1;
+        else if (add_src1_to_am_line)
+            am_line <= main_adder_dest[15:0];
     end
 
-    logic reset_am_line;
     logic add_src1_to_am_line;
-
-    assign reset_am_line =
-        reset_this_cycle || write_program_header ||
-        (write_status && (state_is_pause_for_end_sequence || state_is_pause_for_illegal));
 
     assign add_src1_to_am_line =
         (exec_current_instruction_this_cycle && current_instruction_is_advanceline) ||
@@ -740,16 +730,13 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic [9:0]  am_column;
 
     always_ff @(posedge clk) begin
-        if      (reset_am_column)             am_column <= 10'h0;
-        else if (assign_operand_to_am_column) am_column <= st_operand[9:0];
+        if (reset_for_rst_or_write_program_header_or_write_status_after_end_or_illegal)
+            am_column <= 10'h0;
+        else if (assign_operand_to_am_column)
+            am_column <= st_operand[9:0];
     end
 
-    logic reset_am_column;
     logic assign_operand_to_am_column;
-
-    assign reset_am_column =
-        reset_this_cycle || write_program_header ||
-        (write_status && (state_is_pause_for_end_sequence || state_is_pause_for_illegal));
 
     assign assign_operand_to_am_column =
         exec_current_instruction_this_cycle && current_instruction_is_setcolumn;
@@ -760,17 +747,13 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic am_is_stmt;
 
     always_ff @(posedge clk) begin
-        if      (reset_this_cycle)            am_is_stmt <= 0;
-        else if (write_program_header)        am_is_stmt <= data_in[0];
-        else if (reset_am_is_stmt_to_default) am_is_stmt <= ph_default_is_stmt;
-        else if (negate_am_is_stmt)           am_is_stmt <= !am_is_stmt;
+        if      (reset_this_cycle)                            am_is_stmt <= 0;
+        else if (write_program_header)                        am_is_stmt <= data_in[0];
+        else if (reset_for_write_status_after_end_or_illegal) am_is_stmt <= ph_default_is_stmt;
+        else if (negate_am_is_stmt)                           am_is_stmt <= !am_is_stmt;
     end
 
-    logic reset_am_is_stmt_to_default;
     logic negate_am_is_stmt;
-
-    assign reset_am_is_stmt_to_default =
-        (write_status && (state_is_pause_for_end_sequence || state_is_pause_for_illegal));
 
     assign negate_am_is_stmt = parse_standard_opcode_this_cycle && current_byte_is_lns_negatestmt;
 
@@ -788,7 +771,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic set_am_basic_block;
 
     assign reset_am_basic_block =
-        reset_this_cycle || write_program_header ||
+        reset_for_rst_or_write_program_header ||
         (write_status && execution_paused);
 
     assign set_am_basic_block =
@@ -800,16 +783,13 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic am_end_sequence;
 
     always_ff @(posedge clk) begin
-        if      (reset_am_end_sequence) am_end_sequence <= 0;
-        else if (set_am_end_sequence)   am_end_sequence <= 1;
+        if (reset_for_rst_or_write_program_header_or_write_status_after_end_or_illegal)
+            am_end_sequence <= 0;
+        else if (set_am_end_sequence)
+            am_end_sequence <= 1;
     end
 
-    logic reset_am_end_sequence;
     logic set_am_end_sequence;
-
-    assign reset_am_end_sequence =
-        reset_this_cycle || write_program_header ||
-        (write_status && (state_is_pause_for_end_sequence || state_is_pause_for_illegal));
 
     assign set_am_end_sequence =
         parse_extended_opcode_this_cycle && current_byte_is_lne_endsequence;
@@ -828,7 +808,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic set_am_prologue_end;
 
     assign reset_am_prologue_end =
-        reset_this_cycle || write_program_header ||
+        reset_for_rst_or_write_program_header ||
         (write_status && execution_paused);
 
     assign set_am_prologue_end =
@@ -848,7 +828,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic set_am_epilogue_begin;
 
     assign reset_am_epilogue_begin =
-        reset_this_cycle || write_program_header ||
+        reset_for_rst_or_write_program_header ||
         (write_status && execution_paused);
 
     assign set_am_epilogue_begin =
@@ -870,7 +850,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic assign_operand_to_am_discriminator;
 
     assign reset_am_discriminator =
-        reset_this_cycle || write_program_header ||
+        reset_for_rst_or_write_program_header ||
         (write_status && execution_paused);
 
     assign assign_operand_to_am_discriminator =
@@ -980,6 +960,26 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     // COMMON COMPARISONS
     // A series of common comparisons, done in one place.
+
+    logic reset_for_rst_or_write_program_header;
+    logic reset_for_rst_or_write_program_header_or_status;
+    logic reset_for_rst_or_write_program_header_or_status_from_illegal;
+    logic reset_for_write_status_after_end_or_illegal;
+    logic reset_for_rst_or_write_program_header_or_write_status_after_end_or_illegal;
+
+    assign reset_for_rst_or_write_program_header = reset_this_cycle || write_program_header;
+
+    assign reset_for_rst_or_write_program_header_or_status =
+        reset_for_rst_or_write_program_header || write_status;
+
+    assign reset_for_rst_or_write_program_header_or_status_from_illegal =
+        reset_for_rst_or_write_program_header || (write_status && state_is_pause_for_illegal);
+
+    assign reset_for_write_status_after_end_or_illegal =
+        write_status && (state_is_pause_for_end_sequence || state_is_pause_for_illegal);
+
+    assign reset_for_rst_or_write_program_header_or_write_status_after_end_or_illegal =
+        reset_for_rst_or_write_program_header || reset_for_write_status_after_end_or_illegal;
 
     logic address_2_byte_aligned;
     logic address_4_byte_aligned;
