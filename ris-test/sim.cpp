@@ -26,22 +26,20 @@ void SoftwareSim::reset() {
 	epiloque_begin    = false;
 	discriminator     = 0;
 
-	interrupt        = false;
 	status           = STATUS_READY;
 	needs_full_reset = false;
 }
 
 void SoftwareSim::run_to_emit_row_or_illegal() {
-	while (!interrupt) {
+	do {
 		step_instruction();
-	}
+	} while (status != STATUS_EMIT_ROW && status != STATUS_ILLEGAL);
 }
 
 void SoftwareSim::resume() {
 	if (needs_full_reset) {
 		reset();
 	} else {
-		interrupt         = false;
 		status            = STATUS_READY;
 		discriminator     = 0;
 		basic_block_start = false;
@@ -56,14 +54,12 @@ void SoftwareSim::step_instruction() {
 		uint8_t adjusted_opcode = opcode - opcode_base;
 		address                 = (address + (adjusted_opcode / line_range)) & 0xfffffff;
 		line                    = line + line_base + (adjusted_opcode % line_range);
-		interrupt               = true;
 		status                  = STATUS_EMIT_ROW;
 	} else if (opcode == EXTENDED_OPCODE_START) {
 		read_uleb();
 		opcode = test->program[ip++];
 		if (opcode == DW_LNE_ENDSEQUENCE) {
 			status           = STATUS_EMIT_ROW;
-			interrupt        = true;
 			needs_full_reset = true;
 			end_sequence     = true;
 		} else if (opcode == DW_LNE_SETADDRESS) {
@@ -71,15 +67,13 @@ void SoftwareSim::step_instruction() {
 		} else if (opcode == DW_LNE_SETDISCRIMINATOR) {
 			discriminator = read_uleb();
 		} else {
-			interrupt        = true;
 			status           = STATUS_ILLEGAL;
 			needs_full_reset = true;
 		}
 	} else {
 		switch (opcode) {
 			case DW_LNS_COPY: {
-				interrupt = true;
-				status    = STATUS_EMIT_ROW;
+				status = STATUS_EMIT_ROW;
 			} break;
 			case DW_LNS_ADVANCEPC: {
 				address = (address + read_uleb()) & 0xfffffff;
@@ -116,8 +110,7 @@ void SoftwareSim::step_instruction() {
 				read_uleb();
 			} break;
 			default: {
-				interrupt = true;
-				status = STATUS_ILLEGAL;
+				status           = STATUS_ILLEGAL;
 				needs_full_reset = true;
 			} break;
 		}
@@ -204,38 +197,26 @@ HardwareSim::~HardwareSim() {
 }
 
 void HardwareSim::set_program(Test *test_in) {
-	test      = test_in;
-	ip        = 0;
-	interrupt = false;
+	test = test_in;
+	ip   = 0;
 
 	write_dword(PROGRAM_HEADER, test->program_header);
 }
 
 bool HardwareSim::run_to_emit_row_or_illegal() {
-	int timeout;
 	while (true) {
-		timeout = 1000;
-		while (!interrupt && timeout-- > 0) {
-			write_next();
-		}
-		if (timeout == 0) {
-			return false;
-		}
-		interrupt = false;
+		int timeout     = 1000;
 		uint32_t status = read_dword(STATUS);
-		timeout = 1000;
-		while (status == STATUS_BUSY && timeout-- > 0) {
-			run_cycle();
+		while (status == STATUS_BUSY) {
 			status = read_dword(STATUS);
+			if (--timeout == 0) {
+				return false;
+			}
 		}
-		if (timeout == 0) {
-			return false;
-		}
-		if (status == STATUS_PAUSED) {
-			write_dword(STATUS, 0);
-		} else if (status == STATUS_EMIT_ROW || status == STATUS_ILLEGAL) {
+		if (status == STATUS_EMIT_ROW || status == STATUS_ILLEGAL) {
 			break;
 		}
+		write_next();
 	}
 	return true;
 }
@@ -266,7 +247,6 @@ void HardwareSim::run_cycle() {
 	verilator_sim->clk = 1;
 	verilator_sim->eval();
 	verilator_sim->clk = 0;
-	interrupt |= verilator_sim->user_interrupt;
 }
 
 void HardwareSim::write_next() {

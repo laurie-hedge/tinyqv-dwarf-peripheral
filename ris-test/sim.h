@@ -63,7 +63,6 @@ public:
 	bool epiloque_begin;
 	uint16_t discriminator;
 
-	bool interrupt;
 	uint8_t status;
 
 public:
@@ -88,7 +87,6 @@ class HardwareSim
 	Test *test;
 
 	size_t ip;
-	bool interrupt;
 
 public:
 	HardwareSim();
