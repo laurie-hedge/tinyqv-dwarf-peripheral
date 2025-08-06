@@ -149,19 +149,19 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic execution_paused;
     logic write_status;
 
-    assign reset_this_cycle = !rst_n;
+    assign reset_this_cycle = !deferred_rst_n;
 
-    assign write_this_cycle = rst_n && data_write_active && data_write_valid_alignment;
+    assign write_this_cycle = deferred_rst_n && data_write_active && data_write_valid_alignment;
 
-    assign exec_current_instruction_this_cycle = rst_n && !write_this_cycle && state_is_exec;
+    assign exec_current_instruction_this_cycle = deferred_rst_n && !write_this_cycle && state_is_exec;
 
-    assign special_opcode_this_cycle = rst_n && !write_this_cycle && state_is_special_opcode;
+    assign special_opcode_this_cycle = deferred_rst_n && !write_this_cycle && state_is_special_opcode;
 
     assign special_opcode_end_this_cycle =
         special_opcode_this_cycle && st_operand[7:0] < ph_line_range;
 
     assign parse_byte_this_cycle =
-        rst_n && !write_this_cycle && !exec_current_instruction_this_cycle &&
+        deferred_rst_n && !write_this_cycle && !exec_current_instruction_this_cycle &&
         !special_opcode_this_cycle && !execution_paused && current_byte_valid;
 
     assign parse_extended_opcode_this_cycle = parse_byte_this_cycle && state_is_extended_opcode;
@@ -947,6 +947,17 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign status_is_busy =
         current_byte_valid || state_is_special_opcode || exec_current_instruction_this_cycle;
+
+    // DEFERRED RESET
+    // The input rst_n is synchronised on the falling edge, creating tighter timing on logic chains
+    // from this. By capturing the reset signal in a flip-flop in the rising edge, logic using
+    // reset is delayed until the next cycle but has the whole clock cycle rather than half of it.
+
+    logic deferred_rst_n;
+    
+    always_ff @(posedge clk) begin
+        deferred_rst_n <= rst_n;
+    end
 
     // SHARED ADDERS
     // There are several places using a general adder, and a couple using a special case adder where

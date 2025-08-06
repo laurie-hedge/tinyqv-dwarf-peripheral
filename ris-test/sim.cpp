@@ -184,12 +184,9 @@ HardwareSim::HardwareSim() {
 	verilator_sim->data_in      = 0;
 	verilator_sim->data_write_n = 3;
 	verilator_sim->data_read_n  = 3;
-	verilator_sim->eval();
-	verilator_sim->clk = 1;
-	verilator_sim->eval();
-	verilator_sim->clk   = 0;
+	run_cycle();
 	verilator_sim->rst_n = 1;
-	verilator_sim->eval();
+	run_cycle();
 }
 
 HardwareSim::~HardwareSim() {
