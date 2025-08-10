@@ -2,6 +2,7 @@
 .idea
 *.vcd
 *.bin
+*.dump
 runs
 tt_submission
 src/user_config.json
@@ -12,3 +13,4 @@ test/results.xml
 test/gate_level_netlist.v
 /local/
 /ris-test/obj_dir/
+/tools/show-asm/obj_dir/

@@ -76,7 +76,7 @@ private:
 	uint32_t read_uleb();
 	int32_t read_sleb();
 	uint32_t read_u16();
-	uint32_t read_u64();
+	uint32_t read_u32();
 };
 
 class HardwareSim

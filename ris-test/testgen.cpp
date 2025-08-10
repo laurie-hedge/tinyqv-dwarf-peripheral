@@ -101,13 +101,13 @@ void RandomTestGenerator::add_random_instruction(Test *test, uint32_t opcode_bas
 			if (legal_ext_insn == 1) {
 				test->program.push_back(0x01);
 			} else if (legal_ext_insn == 2) {
-				test->program.push_back(0x09);
+				test->program.push_back(0x05);
 			} else if (legal_ext_insn == 4) {
 				test->program.push_back(leb_size);
 			}
 			test->program.push_back(legal_ext_insn);
 			if (legal_ext_insn == 2) {
-				for (int i = 0; i < 8; ++i) {
+				for (int i = 0; i < 4; ++i) {
 					test->program.push_back(byte_dist(rng));
 				}
 			} else if (legal_ext_insn == 4) {

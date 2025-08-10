@@ -882,9 +882,8 @@ async def test_dw_lne_set_address(dut):
 
     # test set address
     assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 0x0
-    await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0xDD << 24) | (ExtendedOpcode.DwLneSetAddress << 16) | (0x09 << 8) | ExtendedOpcode.START)
-    await tqv.write_word_reg(MmReg.PROGRAM_CODE, 0x44AABBCC)
-    await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 24) | 0x112233)
+    await tqv.write_word_reg(MmReg.PROGRAM_CODE, (0xDD << 24) | (ExtendedOpcode.DwLneSetAddress << 16) | (0x05 << 8) | ExtendedOpcode.START)
+    await tqv.write_word_reg(MmReg.PROGRAM_CODE, (StandardOpcode.DwLnsCopy << 24) | 0xAABBCC)
     assert await wait_for_status_code(dut, tqv, StatusCode.EMIT_ROW, 10)
     assert await tqv.read_word_reg(MmReg.AM_ADDRESS) == 0xABBCCDD
     await tqv.write_byte_reg(MmReg.STATUS, 1)

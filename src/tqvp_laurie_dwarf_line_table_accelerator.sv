@@ -99,14 +99,10 @@ module tqvp_laurie_dwarf_line_table_accelerator(
         STATE_PARSE_LEB_128_OVERFLOW,
         STATE_PARSE_U16_BYTE0,
         STATE_PARSE_U16_BYTE1,
-        STATE_PARSE_U64_BYTE0,
-        STATE_PARSE_U64_BYTE1,
-        STATE_PARSE_U64_BYTE2,
-        STATE_PARSE_U64_BYTE3,
-        STATE_PARSE_U64_BYTE4,
-        STATE_PARSE_U64_BYTE5,
-        STATE_PARSE_U64_BYTE6,
-        STATE_PARSE_U64_BYTE7,
+        STATE_PARSE_U32_BYTE0,
+        STATE_PARSE_U32_BYTE1,
+        STATE_PARSE_U32_BYTE2,
+        STATE_PARSE_U32_BYTE3,
         STATE_EXEC
     } st_state;
 
@@ -124,14 +120,10 @@ module tqvp_laurie_dwarf_line_table_accelerator(
         else if (set_st_state_parse_leb_128_overflow) st_state <= STATE_PARSE_LEB_128_OVERFLOW;
         else if (set_st_state_parse_u16_byte0)        st_state <= STATE_PARSE_U16_BYTE0;
         else if (set_st_state_parse_u16_byte1)        st_state <= STATE_PARSE_U16_BYTE1;
-        else if (set_st_state_parse_u64_byte0)        st_state <= STATE_PARSE_U64_BYTE0;
-        else if (set_st_state_parse_u64_byte1)        st_state <= STATE_PARSE_U64_BYTE1;
-        else if (set_st_state_parse_u64_byte2)        st_state <= STATE_PARSE_U64_BYTE2;
-        else if (set_st_state_parse_u64_byte3)        st_state <= STATE_PARSE_U64_BYTE3;
-        else if (set_st_state_parse_u64_byte4)        st_state <= STATE_PARSE_U64_BYTE4;
-        else if (set_st_state_parse_u64_byte5)        st_state <= STATE_PARSE_U64_BYTE5;
-        else if (set_st_state_parse_u64_byte6)        st_state <= STATE_PARSE_U64_BYTE6;
-        else if (set_st_state_parse_u64_byte7)        st_state <= STATE_PARSE_U64_BYTE7;
+        else if (set_st_state_parse_u32_byte0)        st_state <= STATE_PARSE_U32_BYTE0;
+        else if (set_st_state_parse_u32_byte1)        st_state <= STATE_PARSE_U32_BYTE1;
+        else if (set_st_state_parse_u32_byte2)        st_state <= STATE_PARSE_U32_BYTE2;
+        else if (set_st_state_parse_u32_byte3)        st_state <= STATE_PARSE_U32_BYTE3;
         else if (set_st_state_exec)                   st_state <= STATE_EXEC;
     end
 
@@ -197,14 +189,10 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic set_st_state_parse_leb_128_overflow;
     logic set_st_state_parse_u16_byte0;
     logic set_st_state_parse_u16_byte1;
-    logic set_st_state_parse_u64_byte0;
-    logic set_st_state_parse_u64_byte1;
-    logic set_st_state_parse_u64_byte2;
-    logic set_st_state_parse_u64_byte3;
-    logic set_st_state_parse_u64_byte4;
-    logic set_st_state_parse_u64_byte5;
-    logic set_st_state_parse_u64_byte6;
-    logic set_st_state_parse_u64_byte7;
+    logic set_st_state_parse_u32_byte0;
+    logic set_st_state_parse_u32_byte1;
+    logic set_st_state_parse_u32_byte2;
+    logic set_st_state_parse_u32_byte3;
     logic set_st_state_exec;
 
     assign set_st_state_ready =
@@ -262,22 +250,14 @@ module tqvp_laurie_dwarf_line_table_accelerator(
 
     assign set_st_state_parse_u16_byte1 = parse_byte_this_cycle && state_is_parse_u16_byte0;
 
-    assign set_st_state_parse_u64_byte0 =
+    assign set_st_state_parse_u32_byte0 =
         parse_extended_opcode_this_cycle && current_byte_is_lne_setaddress;
 
-    assign set_st_state_parse_u64_byte1 = parse_byte_this_cycle && state_is_parse_u64_byte0;
+    assign set_st_state_parse_u32_byte1 = parse_byte_this_cycle && state_is_parse_u32_byte0;
 
-    assign set_st_state_parse_u64_byte2 = parse_byte_this_cycle && state_is_parse_u64_byte1;
+    assign set_st_state_parse_u32_byte2 = parse_byte_this_cycle && state_is_parse_u32_byte1;
 
-    assign set_st_state_parse_u64_byte3 = parse_byte_this_cycle && state_is_parse_u64_byte2;
-
-    assign set_st_state_parse_u64_byte4 = parse_byte_this_cycle && state_is_parse_u64_byte3;
-
-    assign set_st_state_parse_u64_byte5 = parse_byte_this_cycle && state_is_parse_u64_byte4;
-
-    assign set_st_state_parse_u64_byte6 = parse_byte_this_cycle && state_is_parse_u64_byte5;
-
-    assign set_st_state_parse_u64_byte7 = parse_byte_this_cycle && state_is_parse_u64_byte6;
+    assign set_st_state_parse_u32_byte3 = parse_byte_this_cycle && state_is_parse_u32_byte2;
 
     assign set_st_state_exec =
         parse_byte_this_cycle && (
@@ -285,7 +265,7 @@ module tqvp_laurie_dwarf_line_table_accelerator(
                 state_is_parse_leb_128_byte0 || state_is_parse_leb_128_byte1 ||
                 state_is_parse_leb_128_byte2 || state_is_parse_leb_128_byte3 ||
                 state_is_parse_leb_128_overflow)
-            ) || state_is_parse_u16_byte1 || state_is_parse_u64_byte7);
+            ) || state_is_parse_u16_byte1 || state_is_parse_u32_byte3);
 
     // CURRENT INSTRUCTION
     // Instructions with operands and extended instructions cannot be executed on their first byte,
@@ -623,14 +603,14 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     assign parse_leb_128_byte3 = parse_byte_this_cycle && state_is_parse_leb_128_byte3;
 
     assign parse_uint_byte0 =
-        parse_byte_this_cycle && (state_is_parse_u16_byte0 || state_is_parse_u64_byte0);
+        parse_byte_this_cycle && (state_is_parse_u16_byte0 || state_is_parse_u32_byte0);
 
     assign parse_uint_byte1 =
-        parse_byte_this_cycle && (state_is_parse_u16_byte1 || state_is_parse_u64_byte1);
+        parse_byte_this_cycle && (state_is_parse_u16_byte1 || state_is_parse_u32_byte1);
 
-    assign parse_uint_byte2 = parse_byte_this_cycle && state_is_parse_u64_byte2;
+    assign parse_uint_byte2 = parse_byte_this_cycle && state_is_parse_u32_byte2;
 
-    assign parse_uint_byte3 = parse_byte_this_cycle && state_is_parse_u64_byte3;
+    assign parse_uint_byte3 = parse_byte_this_cycle && state_is_parse_u32_byte3;
 
     logic [27:0] byte_subtractor_dest_zero_extended;
     logic [7:0]  byte_subtractor_dest;
@@ -1094,14 +1074,10 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     logic state_is_parse_leb_128_overflow;
     logic state_is_parse_u16_byte0;
     logic state_is_parse_u16_byte1;
-    logic state_is_parse_u64_byte0;
-    logic state_is_parse_u64_byte1;
-    logic state_is_parse_u64_byte2;
-    logic state_is_parse_u64_byte3;
-    logic state_is_parse_u64_byte4;
-    logic state_is_parse_u64_byte5;
-    logic state_is_parse_u64_byte6;
-    logic state_is_parse_u64_byte7;
+    logic state_is_parse_u32_byte0;
+    logic state_is_parse_u32_byte1;
+    logic state_is_parse_u32_byte2;
+    logic state_is_parse_u32_byte3;
 
     assign state_is_exec                   = st_state == STATE_EXEC;
     assign state_is_special_opcode         = st_state == STATE_SPECIAL_OPCODE;
@@ -1117,14 +1093,10 @@ module tqvp_laurie_dwarf_line_table_accelerator(
     assign state_is_parse_leb_128_overflow = st_state == STATE_PARSE_LEB_128_OVERFLOW;
     assign state_is_parse_u16_byte0        = st_state == STATE_PARSE_U16_BYTE0;
     assign state_is_parse_u16_byte1        = st_state == STATE_PARSE_U16_BYTE1;
-    assign state_is_parse_u64_byte0        = st_state == STATE_PARSE_U64_BYTE0;
-    assign state_is_parse_u64_byte1        = st_state == STATE_PARSE_U64_BYTE1;
-    assign state_is_parse_u64_byte2        = st_state == STATE_PARSE_U64_BYTE2;
-    assign state_is_parse_u64_byte3        = st_state == STATE_PARSE_U64_BYTE3;
-    assign state_is_parse_u64_byte4        = st_state == STATE_PARSE_U64_BYTE4;
-    assign state_is_parse_u64_byte5        = st_state == STATE_PARSE_U64_BYTE5;
-    assign state_is_parse_u64_byte6        = st_state == STATE_PARSE_U64_BYTE6;
-    assign state_is_parse_u64_byte7        = st_state == STATE_PARSE_U64_BYTE7;
+    assign state_is_parse_u32_byte0        = st_state == STATE_PARSE_U32_BYTE0;
+    assign state_is_parse_u32_byte1        = st_state == STATE_PARSE_U32_BYTE1;
+    assign state_is_parse_u32_byte2        = st_state == STATE_PARSE_U32_BYTE2;
+    assign state_is_parse_u32_byte3        = st_state == STATE_PARSE_U32_BYTE3;
 
     logic current_byte_is_lns_copy;
     logic current_byte_is_lns_advancepc;

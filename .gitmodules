@@ -1,0 +1,3 @@
+[submodule "tools/show-asm/riscv-disassembler"]
+	path = tools/show-asm/riscv-disassembler
+	url = https://github.com/michaeljclark/riscv-disassembler.git

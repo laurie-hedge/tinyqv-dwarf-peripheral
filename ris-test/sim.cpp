@@ -63,7 +63,7 @@ void SoftwareSim::step_instruction() {
 			needs_full_reset = true;
 			end_sequence     = true;
 		} else if (opcode == DW_LNE_SETADDRESS) {
-			address = read_u64() & 0xfffffff;
+			address = read_u32() & 0xfffffff;
 		} else if (opcode == DW_LNE_SETDISCRIMINATOR) {
 			discriminator = read_uleb();
 		} else {
@@ -166,10 +166,10 @@ uint32_t SoftwareSim::read_u16() {
 	return result;
 }
 
-uint32_t SoftwareSim::read_u64() {
-	uint64_t result;
-	memcpy(&result, test->program.data() + ip, 8);
-	ip += 8;
+uint32_t SoftwareSim::read_u32() {
+	uint32_t result;
+	memcpy(&result, test->program.data() + ip, 4);
+	ip += 4;
 	return result;
 }
 
