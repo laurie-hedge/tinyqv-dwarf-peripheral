@@ -24,7 +24,6 @@ module tt_um_tqv_peripheral_harness (
   reg [1:0] data_write_n;
   reg [1:0] data_read_n;
   wire data_ready;
-  wire user_interrupt;
 
   // Peripherals get synchronized ui_in.
   reg [7:0] ui_in_sync;
@@ -47,8 +46,7 @@ module tt_um_tqv_peripheral_harness (
     .data_write_n(data_write_n),
     .data_read_n(data_read_n),
     .data_out(data_out),
-    .data_ready(data_ready),
-    .user_interrupt(user_interrupt)
+    .data_ready(data_ready)
   );
 
   // SPI data indications
@@ -115,7 +113,7 @@ module tt_um_tqv_peripheral_harness (
   // Assign outputs
   assign uio_out[3] = spi_miso;
   assign uio_oe[3] = 1;
-  assign uio_out[0] = user_interrupt;
+  assign uio_out[0] = 0;
   assign uio_oe[0] = 1;
   assign uio_out[1] = data_ready;
   assign uio_oe[1] = 1;
